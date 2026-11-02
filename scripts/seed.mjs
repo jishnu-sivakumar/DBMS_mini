@@ -1,92 +1,13 @@
 import pg from 'pg';
 import bcrypt from 'bcryptjs';
+// Same embedding code the app uses (real all-MiniLM-L6-v2 via transformers.js)
+import {
+  generateLocalEmbedding,
+  buildPropertySearchText,
+  toVectorLiteral,
+  LOCAL_MODEL_NAME,
+} from '../lib/embeddings.ts';
 const { Pool } = pg;
-
-const EMBEDDING_DIMENSION = 384;
-
-function normalizeVector(vector) {
-  const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
-  if (norm === 0) return vector;
-  return vector.map((val) => Number((val / norm).toFixed(6)));
-}
-
-function generateLocalEmbedding(text) {
-  const cleanText = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
-  const tokens = cleanText.split(/\s+/).filter(Boolean);
-  const vector = new Array(EMBEDDING_DIMENSION).fill(0);
-
-  if (tokens.length === 0) {
-    vector[0] = 1.0;
-    return vector;
-  }
-
-  const semanticClusters = {
-    bedroom: [10, 11, 12, 13, 14],
-    bhk: [10, 11, 12, 13, 14],
-    rk: [15, 16],
-    quiet: [20, 21, 22],
-    peaceful: [20, 21, 22],
-    calm: [20, 21, 22],
-    tech: [30, 31, 32],
-    it: [30, 31, 32],
-    park: [30, 31, 32],
-    office: [33, 34],
-    pet: [40, 41, 42],
-    dog: [40, 41],
-    cat: [40, 41],
-    pool: [50, 51, 52],
-    swimming: [50, 51, 52],
-    luxury: [60, 61, 62],
-    premium: [60, 61, 62],
-    penthouse: [60, 63, 64],
-    budget: [70, 71, 72],
-    cheap: [70, 71, 72],
-    affordable: [70, 71, 72],
-    student: [75, 76, 77],
-    gym: [80, 81, 82],
-    fitness: [80, 81],
-    balcony: [90, 91, 92],
-    terrace: [90, 93],
-    metro: [100, 101, 102],
-    station: [100, 101],
-    transit: [100, 103],
-    furnished: [110, 111, 112],
-    interior: [110, 113],
-    garden: [120, 121, 122],
-    gated: [130, 131],
-    security: [130, 132],
-  };
-
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
-    let hash = 0;
-    for (let c = 0; c < token.length; c++) {
-      hash = (hash << 5) - hash + token.charCodeAt(c);
-      hash |= 0;
-    }
-    const idx = Math.abs(hash) % EMBEDDING_DIMENSION;
-    vector[idx] += 1.0;
-
-    if (semanticClusters[token]) {
-      semanticClusters[token].forEach((slot) => {
-        vector[slot % EMBEDDING_DIMENSION] += 2.5;
-      });
-    }
-
-    if (i < tokens.length - 1) {
-      const bigram = `${token}_${tokens[i + 1]}`;
-      let bHash = 0;
-      for (let c = 0; c < bigram.length; c++) {
-        bHash = (bHash << 5) - bHash + bigram.charCodeAt(c);
-        bHash |= 0;
-      }
-      const bIdx = Math.abs(bHash) % EMBEDDING_DIMENSION;
-      vector[bIdx] += 1.5;
-    }
-  }
-
-  return normalizeVector(vector);
-}
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) {
@@ -274,16 +195,15 @@ async function seed() {
     }
 
     // 4. Generate and Insert Vector Embeddings into property_embeddings
-    console.log('Generating 384-dimensional vector embeddings for property catalog...');
+    console.log('Generating 384-dimensional all-MiniLM-L6-v2 embeddings (first run downloads the model)...');
     for (const prop of insertedProperties) {
-      const searchContent = `${prop.title}. ${prop.description}. Type: ${prop.bedrooms} BHK ${prop.property_type} in ${prop.city}, located at ${prop.address}. Amenities: ${prop.amenities.join(', ')}`;
-      const embedding = generateLocalEmbedding(searchContent);
-      const vectorLiteral = `[${embedding.join(',')}]`;
+      const searchContent = buildPropertySearchText(prop);
+      const embedding = await generateLocalEmbedding(searchContent);
 
       await client.query(
         `INSERT INTO property_embeddings (property_id, embedding, model_name, indexed_content)
          VALUES ($1, $2::vector, $3, $4)`,
-        [prop.id, vectorLiteral, 'all-MiniLM-L6-v2', searchContent]
+        [prop.id, toVectorLiteral(embedding), LOCAL_MODEL_NAME, searchContent]
       );
     }
 
