@@ -6,6 +6,7 @@ import {
   buildPropertySearchText,
   toVectorLiteral,
   LOCAL_MODEL_NAME,
+  isUsingFallbackEmbeddings,
 } from '../lib/embeddings.ts';
 import { owners, tenants, admin, properties, reviews, bookings } from './seed-data.mjs';
 
@@ -92,6 +93,15 @@ async function seed() {
         `INSERT INTO property_embeddings (property_id, embedding, model_name, indexed_content)
          VALUES ($1, $2::vector, $3, $4)`,
         [prop.id, toVectorLiteral(embedding), LOCAL_MODEL_NAME, searchContent]
+      );
+    }
+
+    // The stored vectors must come from the real model, otherwise search compares unlike vectors
+    if (isUsingFallbackEmbeddings() && process.env.ALLOW_FALLBACK_EMBEDDINGS !== 'true') {
+      throw new Error(
+        'The all-MiniLM-L6-v2 model could not be loaded, so only fallback vectors were produced. ' +
+          'Check your internet connection (first run downloads the model) or raise EMBEDDING_LOAD_TIMEOUT_MS, ' +
+          'then run the seed again. Set ALLOW_FALLBACK_EMBEDDINGS=true to seed with fallback vectors anyway.'
       );
     }
 
