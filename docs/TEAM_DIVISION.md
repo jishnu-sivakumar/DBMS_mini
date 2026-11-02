@@ -96,7 +96,13 @@ Member 2 owns everything that happens after a tenant finds a listing: who is all
 6. **Dataset & smarter search** (`scripts/seed-data.mjs`, `lib/query-parser.ts`)
    - 58 listings in 15 cities across the whole price range, plus extra users, reviews, and bookings in every status.
    - Budget, bedrooms and city written inside the search sentence are parsed into exact SQL filters (vector similarity is poor at numbers); the UI shows what was understood.
-7. **SQL for the report** (`db/queries.sql`, `db/transactions_tests.sql`)
+7. **Owner Portal detail pages** (`app/dashboard/owner/{properties,requests,confirmed,revenue}`, `/api/owner/properties`)
+   - The four dashboard cards open pages listing the owner's properties, pending requests, confirmed bookings and revenue (collected vs outstanding).
+8. **Hosted database support** (`DATABASE_SSL`, `docs/HOSTED_DATABASE.md`)
+   - The same PostgreSQL schema can run on Supabase or Neon; the guide explains how to browse the data online.
+9. **Project report** (`docs/report/`)
+   - 52-page PDF and editable Word file with ER diagram, SQL and vector commands, screenshots, data dictionary and rubric status.
+10. **SQL for the report** (`db/queries.sql`, `db/transactions_tests.sql`)
    - 30+ labelled queries and a transaction / negative test script (23 checks, all PASS).
 
 ---
