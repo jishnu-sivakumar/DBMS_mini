@@ -6,8 +6,11 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const connectionString =
-  process.env.DATABASE_URL || 'postgresql://postgres@localhost:5432/propfind_db';
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  console.error('DATABASE_URL is not set. Copy .env.example to .env first.');
+  process.exit(1);
+}
 
 const pool = new pg.Pool({ connectionString });
 
