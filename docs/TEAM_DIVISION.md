@@ -93,7 +93,10 @@ Member 2 owns everything that happens after a tenant finds a listing: who is all
 5. **Real embeddings** (`lib/embeddings.ts`, `next.config.mjs`, `scripts/seed.mjs`)
    - Keyword-hash vectorizer replaced by real `all-MiniLM-L6-v2` (mean pooling, normalised, 384 dims); optional OpenAI path kept.
    - Listing text now puts amenities before the description, so *"house where I can keep my dog"* returns the pet-friendly villa first.
-6. **SQL for the report** (`db/queries.sql`, `db/transactions_tests.sql`)
+6. **Dataset & smarter search** (`scripts/seed-data.mjs`, `lib/query-parser.ts`)
+   - 58 listings in 15 cities across the whole price range, plus extra users, reviews, and bookings in every status.
+   - Budget, bedrooms and city written inside the search sentence are parsed into exact SQL filters (vector similarity is poor at numbers); the UI shows what was understood.
+7. **SQL for the report** (`db/queries.sql`, `db/transactions_tests.sql`)
    - 30+ labelled queries and a transaction / negative test script (23 checks, all PASS).
 
 ---

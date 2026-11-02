@@ -135,3 +135,12 @@
 
 ## 🛠️ Phase 11: Documentation (`docs/member2`)
 - Updated `README.md` (setup, env vars, demo accounts, full-flow walkthrough, SQL demo commands), `docs/TEAM_DIVISION.md`, and this log.
+
+## 🛠️ Phase 12: Bigger dataset and number-aware search (`feature/more-data`)
+- **Problem seen in the UI:** searching "homes under rent 20k" returned only 5 homes and none under 20k. Two causes: the seed had only 6 listings (none cheap), and "under 20k" inside the sentence was only used for vector similarity, which cannot compare numbers (a 20k and a 50k query embed almost identically).
+- **Data:** `scripts/seed-data.mjs` now holds 58 listings in 15 cities (hostel beds and PGs from Rs 4,500 up to a Rs 2,50,000 penthouse; 23 under Rs 20,000), 6 owners, 6 tenants, 44 reviews, 14 bookings in every status. Bookings are inserted as PENDING and moved through the real state machine so the audit trigger logs them; paid ones go through the payment trigger. Photos are Unsplash images; every photo ID was checked to return HTTP 200 and all 58 are distinct. (Google Images was not used: it has no public API and scraping it breaks its terms.)
+- **Search:** `lib/query-parser.ts` extracts budget (under/below/above/"20k"/"1 lakh"/"15,000"), bedrooms ("2BHK", "3 bedroom") and city from the sentence and applies them as exact SQL filters; only the descriptive remainder is embedded. If nothing descriptive remains, the catalog is returned cheapest first. UI filters still take precedence. 12 parser tests pass (`npm run test:parser`).
+- **Bugs found while testing the parser:** `lakh` was being read as `l` and left "akh" behind; plain numbers like `10000` were truncated to `100`. Both fixed.
+- **UI:** city dropdown now comes from the database (it was hard-coded to 4 cities), wider bedroom and budget options, and "Understood from your search" chips.
+- **Result for the original complaint:** "homes under rent 20k" now returns 23 listings, all at or below Rs 19,500. "pet friendly 2BHK in Pune under 25k" returns the Pune 2BHKs at or below Rs 25,000. The SQL demos still pass (`queries.sql` exit 0, `transactions_tests.sql` 23/23); one query needed a more specific title pattern because a second "Budget 1BHK" listing now exists.
+
