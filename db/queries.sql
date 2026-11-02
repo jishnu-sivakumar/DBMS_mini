@@ -305,3 +305,40 @@ FROM booking_audit a
 LEFT JOIN users u ON u.id = a.changed_by
 ORDER BY a.id
 LIMIT 10;
+
+-- ============================================================================
+-- L. DDL: ALTER and DROP (inside a transaction, rolled back)
+-- ============================================================================
+
+\echo '===== L1. ALTER TABLE: add a column, add a CHECK constraint, rename, set NOT NULL, drop ====='
+BEGIN;
+ALTER TABLE properties ADD COLUMN furnishing VARCHAR(20) DEFAULT 'UNFURNISHED';
+ALTER TABLE properties
+    ADD CONSTRAINT properties_furnishing_check
+    CHECK (furnishing IN ('UNFURNISHED', 'SEMI_FURNISHED', 'FULLY_FURNISHED'));
+UPDATE properties SET furnishing = 'FULLY_FURNISHED' WHERE 'Fully Furnished' = ANY(amenities);
+UPDATE properties SET furnishing = 'SEMI_FURNISHED' WHERE 'Semi-Furnished' = ANY(amenities);
+SELECT furnishing, COUNT(*) AS properties FROM properties GROUP BY furnishing ORDER BY properties DESC;
+ALTER TABLE properties RENAME COLUMN furnishing TO furnishing_level;
+ALTER TABLE properties ALTER COLUMN furnishing_level SET NOT NULL;
+SAVEPOINT before_bad_value;
+\set ON_ERROR_STOP off
+UPDATE properties SET furnishing_level = 'PARTLY' WHERE id = (SELECT id FROM properties LIMIT 1);  -- violates the new CHECK, error expected
+\set ON_ERROR_STOP on
+ROLLBACK TO SAVEPOINT before_bad_value;
+ALTER TABLE properties DROP COLUMN furnishing_level;   -- also drops its CHECK constraint
+ROLLBACK;
+SELECT COUNT(*) AS furnishing_columns_left
+FROM information_schema.columns WHERE table_name = 'properties' AND column_name LIKE 'furnishing%';
+
+\echo '===== L2. CREATE VIEW / DROP VIEW / DROP TABLE (rolled back) ====='
+BEGIN;
+CREATE VIEW view_budget_listings AS
+    SELECT id, title, city, price_per_month FROM properties WHERE price_per_month < 20000;
+SELECT COUNT(*) AS budget_listings, MIN(price_per_month) AS cheapest, MAX(price_per_month) AS dearest FROM view_budget_listings;
+DROP VIEW view_budget_listings;
+CREATE TABLE demo_scratch (id INT PRIMARY KEY, note TEXT);
+INSERT INTO demo_scratch VALUES (1, 'temporary');
+DROP TABLE demo_scratch;
+ROLLBACK;
+SELECT to_regclass('view_budget_listings') AS view_exists, to_regclass('demo_scratch') AS table_exists;
