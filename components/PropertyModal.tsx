@@ -173,19 +173,19 @@ export default function PropertyModal({ property, onClose }: PropertyModalProps)
             </div>
           )}
 
-          {/* Booking Request Form (Member 2 Module Integration) */}
+          {/* Booking request form */}
           <div className="pt-4 border-t border-slate-200">
             <div className="flex items-center justify-between mb-3">
               <div>
                 <h4 className="text-sm font-semibold text-slate-800">
-                  Request to Book (Member 2 Module)
+                  Request to Book
                 </h4>
                 <p className="text-xs text-slate-500">
-                  Tests the ACID transaction & date-conflict stored procedure in PostgreSQL
+                  Runs as one PostgreSQL transaction: the property row is locked and the dates are checked for conflicts
                 </p>
               </div>
-              <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-amber-100 text-amber-800">
-                Teammate Feature
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                Tenant account required
               </span>
             </div>
 
