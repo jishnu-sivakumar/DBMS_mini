@@ -1,5 +1,5 @@
 import { query, withTransaction } from '@/lib/db';
-import { getEmbedding, buildPropertySearchText } from '@/lib/embeddings';
+import { getEmbedding, buildPropertySearchText, toVectorLiteral } from '@/lib/embeddings';
 
 export interface Property {
   id: string;
@@ -80,7 +80,7 @@ export async function searchPropertiesSemantic(filters: SearchFilters): Promise<
 
   // 1. Generate 384-dimensional dense vector for the natural language query
   const queryEmbedding = await getEmbedding(searchQuery);
-  const vectorStr = `[${queryEmbedding.join(',')}]`;
+  const vectorStr = toVectorLiteral(queryEmbedding);
 
   // 2. Query PostgreSQL pgvector cosine distance function
   const sql = `
@@ -211,7 +211,7 @@ export async function createProperty(data: {
     // 2. Generate 384-dimensional vector embedding
     const indexedText = buildPropertySearchText(property);
     const embedding = await getEmbedding(indexedText);
-    const vectorStr = `[${embedding.join(',')}]`;
+    const vectorStr = toVectorLiteral(embedding);
 
     // 3. Store in property_embeddings table
     await client.query(
