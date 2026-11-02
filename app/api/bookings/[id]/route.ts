@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { updateBookingStatus } from '@/lib/services/booking-service';
+import { updateBookingStatus, getBookingHistory } from '@/lib/services/booking-service';
 import { requireRole, denyResponse } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
@@ -34,5 +34,18 @@ export async function PATCH(
     return NextResponse.json({ success: true, message: result.message });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 400 });
+  }
+}
+
+/** Audit trail + payments for one booking (owner of the property or the tenant). */
+export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+  const session = await requireRole('OWNER', 'TENANT');
+  if (!session) return denyResponse();
+
+  try {
+    const history = await getBookingHistory(params.id, session.userId, session.role as 'OWNER' | 'TENANT');
+    return NextResponse.json({ success: true, ...history });
+  } catch (error: any) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 404 });
   }
 }
