@@ -102,7 +102,10 @@ You can also register a new Owner or Tenant at `/register` (nobody can self-regi
 3. Back as the tenant, open **My Bookings** and **Pay**; use **History** to see the audit trail.
 4. Make two overlapping requests for one property, approve one, then approve the other: the database trigger rejects it and the error message shows in the UI.
 
-### 7. SQL demos and tests for the report
+### 7. Optional: use an online PostgreSQL (Supabase / Neon)
+The database above runs in Docker on your own computer. To put it online, create a Supabase or Neon project, set `DATABASE_URL` and `DATABASE_SSL=true` in `.env`, then run `npm run db:setup`. Step-by-step instructions and warnings: [docs/HOSTED_DATABASE.md](docs/HOSTED_DATABASE.md).
+
+### 8. SQL demos and tests for the report
 ```bash
 docker exec -i propfind-db psql -U postgres -d propfind_db < db/queries.sql
 docker exec -i propfind-db psql -U postgres -d propfind_db < db/transactions_tests.sql

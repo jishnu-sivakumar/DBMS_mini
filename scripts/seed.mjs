@@ -18,7 +18,10 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const pool = new Pool({ connectionString });
+// Hosted databases (Supabase, Neon, ...) require TLS: set DATABASE_SSL=true in .env
+const ssl = process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined;
+
+const pool = new Pool({ connectionString, ssl });
 
 // Whole months between two ISO dates (30-day blocks, minimum 1), same rule as the app
 function monthsBetween(start, end) {

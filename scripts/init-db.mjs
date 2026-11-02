@@ -12,7 +12,10 @@ if (!connectionString) {
   process.exit(1);
 }
 
-const pool = new pg.Pool({ connectionString });
+// Hosted databases (Supabase, Neon, ...) require TLS: set DATABASE_SSL=true in .env
+const ssl = process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined;
+
+const pool = new pg.Pool({ connectionString, ssl });
 
 async function init() {
   console.log('🚀 Running PropFind Database Schema Initialization...');
