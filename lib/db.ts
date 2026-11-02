@@ -6,9 +6,10 @@ declare global {
   var _pgPool: Pool | undefined;
 }
 
-const connectionString =
-  process.env.DATABASE_URL ||
-  'postgresql://postgres@localhost:5432/propfind_db';
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  throw new Error('DATABASE_URL is not set (copy .env.example to .env)');
+}
 
 export const pool: Pool =
   global._pgPool ||

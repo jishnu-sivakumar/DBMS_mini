@@ -4,68 +4,37 @@ import {
   getTenantBookings,
   getOwnerBookingRequests,
 } from '@/lib/services/booking-service';
-import { query } from '@/lib/db';
+import { requireRole, denyResponse } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * ============================================================================
- * BOOKINGS API ROUTE (MEMBER 2 BOILERPLATE)
- * ============================================================================
- * 
- * Demonstrates:
- * - Tenant booking submission with ACID transaction row-locking
- * - Fetching booking requests for Owner or Tenant
+ * Bookings API (Member 2)
+ * - GET:  owner -> requests on their properties, tenant -> their own bookings
+ * - POST: tenant submits a booking request (ACID transaction + row lock)
+ * The user always comes from the JWT session, never from the request body.
  */
 
-export async function GET(request: NextRequest) {
+export async function GET() {
+  const session = await requireRole('OWNER', 'TENANT');
+  if (!session) return denyResponse();
+
   try {
-    const { searchParams } = new URL(request.url);
-    const role = searchParams.get('role'); // 'TENANT' | 'OWNER'
-    const userId = searchParams.get('userId');
-
-    if (!userId) {
-      // Pick first demo user based on requested role
-      const userRes = await query(
-        `SELECT id, role, full_name FROM users WHERE role = $1 LIMIT 1`,
-        [role === 'OWNER' ? 'OWNER' : 'TENANT']
-      );
-      if (userRes.rows.length === 0) {
-        return NextResponse.json({ bookings: [] });
-      }
-      const user = userRes.rows[0];
-      const bookings =
-        user.role === 'OWNER'
-          ? await getOwnerBookingRequests(user.id)
-          : await getTenantBookings(user.id);
-
-      return NextResponse.json({
-        success: true,
-        user,
-        bookings,
-        assignedTo: 'Member 2 (Teammate)',
-      });
-    }
-
     const bookings =
-      role === 'OWNER'
-        ? await getOwnerBookingRequests(userId)
-        : await getTenantBookings(userId);
+      session.role === 'OWNER'
+        ? await getOwnerBookingRequests(session.userId)
+        : await getTenantBookings(session.userId);
 
-    return NextResponse.json({
-      success: true,
-      bookings,
-      assignedTo: 'Member 2 (Teammate)',
-    });
+    return NextResponse.json({ success: true, role: session.role, bookings });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
+  const session = await requireRole('TENANT');
+  if (!session) return denyResponse();
+
   try {
     const body = await request.json();
 
@@ -76,18 +45,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Default tenant fallback for demo
-    let tenantId = body.tenant_id;
-    if (!tenantId) {
-      const tenantRes = await query(
-        `SELECT id FROM users WHERE role = 'TENANT' LIMIT 1`
-      );
-      tenantId = tenantRes.rows[0]?.id;
-    }
-
     const result = await createBookingRequest({
       property_id: body.property_id,
-      tenant_id: tenantId,
+      tenant_id: session.userId,
       start_date: body.start_date,
       end_date: body.end_date,
       special_requests: body.special_requests,
@@ -97,12 +57,8 @@ export async function POST(request: NextRequest) {
       success: true,
       message: result.message,
       bookingId: result.bookingId,
-      assignedTo: 'Member 2 (Teammate)',
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 400 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 400 });
   }
 }

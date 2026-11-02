@@ -1,4 +1,5 @@
 import pg from 'pg';
+import bcrypt from 'bcryptjs';
 const { Pool } = pg;
 
 const EMBEDDING_DIMENSION = 384;
@@ -87,8 +88,11 @@ function generateLocalEmbedding(text) {
   return normalizeVector(vector);
 }
 
-const connectionString =
-  process.env.DATABASE_URL || 'postgresql://postgres@localhost:5432/propfind_db';
+const connectionString = process.env.DATABASE_URL;
+if (!connectionString) {
+  console.error('DATABASE_URL is not set. Copy .env.example to .env first.');
+  process.exit(1);
+}
 
 const pool = new Pool({ connectionString });
 
@@ -109,16 +113,26 @@ async function seed() {
 
     // 2. Insert Users (Owners and Tenants)
     console.log('Inserting Owners and Tenants...');
-    const ownerRes = await client.query(`
-      INSERT INTO users (full_name, email, password_hash, role, phone)
-      VALUES 
-        ('Priya Sharma', 'priya.sharma@example.com', '$2b$10$eO1v8o8B41u1Jm32FmHROu6bY1Mv2kM4l9s6H0aP9Yg8J7k6L5m3e', 'OWNER', '+91 98765 43210'),
-        ('Rahul Verma', 'rahul.verma@example.com', '$2b$10$eO1v8o8B41u1Jm32FmHROu6bY1Mv2kM4l9s6H0aP9Yg8J7k6L5m3e', 'OWNER', '+91 98111 22334'),
-        ('Ananya Roy', 'ananya.roy@example.com', '$2b$10$eO1v8o8B41u1Jm32FmHROu6bY1Mv2kM4l9s6H0aP9Yg8J7k6L5m3e', 'OWNER', '+91 99000 88776'),
-        ('Rohan Nair', 'rohan.nair@example.com', '$2b$10$eO1v8o8B41u1Jm32FmHROu6bY1Mv2kM4l9s6H0aP9Yg8J7k6L5m3e', 'TENANT', '+91 97400 11223'),
-        ('Sneha Patel', 'sneha.patel@example.com', '$2b$10$eO1v8o8B41u1Jm32FmHROu6bY1Mv2kM4l9s6H0aP9Yg8J7k6L5m3e', 'TENANT', '+91 96200 44556')
-      RETURNING id, full_name, role;
-    `);
+    const demoPassword = process.env.SEED_PASSWORD || 'password123';
+    const passwordHash = await bcrypt.hash(demoPassword, 10);
+    const demoUsers = [
+      ['Priya Sharma', 'priya.sharma@example.com', 'OWNER', '+91 98765 43210'],
+      ['Rahul Verma', 'rahul.verma@example.com', 'OWNER', '+91 98111 22334'],
+      ['Ananya Roy', 'ananya.roy@example.com', 'OWNER', '+91 99000 88776'],
+      ['Rohan Nair', 'rohan.nair@example.com', 'TENANT', '+91 97400 11223'],
+      ['Sneha Patel', 'sneha.patel@example.com', 'TENANT', '+91 96200 44556'],
+      ['Admin User', 'admin@example.com', 'ADMIN', '+91 90000 00000'],
+    ];
+    const ownerRes = { rows: [] };
+    for (const [name, email, role, phone] of demoUsers) {
+      const r = await client.query(
+        `INSERT INTO users (full_name, email, password_hash, role, phone)
+         VALUES ($1, $2, $3, $4::user_role, $5)
+         RETURNING id, full_name, role`,
+        [name, email, passwordHash, role, phone]
+      );
+      ownerRes.rows.push(r.rows[0]);
+    }
 
     const priyaId = ownerRes.rows.find((u) => u.full_name === 'Priya Sharma').id;
     const rahulId = ownerRes.rows.find((u) => u.full_name === 'Rahul Verma').id;
