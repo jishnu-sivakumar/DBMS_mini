@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Building2, CreditCard, CheckCircle, Clock, AlertTriangle, X } from 'lucide-react';
+import Link from 'next/link';
+import { Building2, CreditCard, CheckCircle, Clock, AlertTriangle, X, ArrowRight } from 'lucide-react';
 
 type Tab = 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED';
 const TABS: { key: Tab; label: string }[] = [
@@ -102,42 +103,54 @@ export default function OwnerDashboardPage() {
         </div>
       )}
 
-      {/* KPI cards from view_owner_analytics (GROUP BY + aggregates) */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-6">
-        <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-semibold">My Properties</span>
-            <Building2 className="w-4 h-4 text-emerald-600" />
-          </div>
-          <div className="text-3xl font-black text-slate-900">{analytics?.total_properties ?? 0}</div>
-          <p className="text-[11px] text-slate-400 mt-1">view_owner_analytics</p>
-        </div>
-        <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-semibold">Pending Requests</span>
-            <Clock className="w-4 h-4 text-amber-600" />
-          </div>
-          <div className="text-3xl font-black text-slate-900">{count('PENDING')}</div>
-          <p className="text-[11px] text-slate-400 mt-1">Awaiting your decision</p>
-        </div>
-        <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-semibold">Confirmed Bookings</span>
-            <CheckCircle className="w-4 h-4 text-teal-600" />
-          </div>
-          <div className="text-3xl font-black text-slate-900">{analytics?.confirmed_bookings ?? 0}</div>
-          <p className="text-[11px] text-slate-400 mt-1">Guarded by date-overlap trigger</p>
-        </div>
-        <div className="p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm">
-          <div className="flex items-center justify-between text-slate-500 mb-2">
-            <span className="text-xs font-semibold">Confirmed Revenue</span>
-            <CreditCard className="w-4 h-4 text-emerald-600" />
-          </div>
-          <div className="text-3xl font-black text-slate-900">
-            ₹{Number(analytics?.total_confirmed_revenue ?? 0).toLocaleString('en-IN')}
-          </div>
-          <p className="text-[11px] text-slate-400 mt-1">SUM of approved bookings</p>
-        </div>
+      {/* KPI cards from view_owner_analytics (GROUP BY + aggregates). Each opens a detail page. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        {[
+          {
+            href: '/dashboard/owner/properties',
+            label: 'My Properties',
+            icon: <Building2 className="w-4 h-4 text-emerald-600" />,
+            value: analytics?.total_properties ?? 0,
+            note: 'View all your listings',
+          },
+          {
+            href: '/dashboard/owner/requests',
+            label: 'Pending Requests',
+            icon: <Clock className="w-4 h-4 text-amber-600" />,
+            value: count('PENDING'),
+            note: 'Review and decide',
+          },
+          {
+            href: '/dashboard/owner/confirmed',
+            label: 'Confirmed Bookings',
+            icon: <CheckCircle className="w-4 h-4 text-teal-600" />,
+            value: analytics?.confirmed_bookings ?? 0,
+            note: 'Tenants, dates, payments',
+          },
+          {
+            href: '/dashboard/owner/revenue',
+            label: 'Confirmed Revenue',
+            icon: <CreditCard className="w-4 h-4 text-emerald-600" />,
+            value: `₹${Number(analytics?.total_confirmed_revenue ?? 0).toLocaleString('en-IN')}`,
+            note: 'Collected vs outstanding',
+          },
+        ].map((card) => (
+          <Link
+            key={card.href}
+            href={card.href}
+            className="group p-6 rounded-3xl bg-white border border-slate-200/80 shadow-sm hover:shadow-md hover:border-emerald-300 transition-all"
+          >
+            <div className="flex items-center justify-between text-slate-500 mb-2">
+              <span className="text-xs font-semibold">{card.label}</span>
+              {card.icon}
+            </div>
+            <div className="text-3xl font-black text-slate-900">{card.value}</div>
+            <p className="flex items-center justify-between text-[11px] text-slate-400 mt-1 group-hover:text-emerald-700 transition-colors">
+              <span>{card.note}</span>
+              <ArrowRight className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </p>
+          </Link>
+        ))}
       </div>
 
       <div className="bg-white rounded-3xl border border-slate-200/80 shadow-sm overflow-hidden p-6 sm:p-8">

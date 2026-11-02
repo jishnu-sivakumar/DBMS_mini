@@ -250,3 +250,64 @@ export async function getOwnerAnalytics() {
   );
   return result.rows;
 }
+
+export interface OwnerPropertyRow {
+  id: string;
+  title: string;
+  property_type: string;
+  city: string;
+  address: string;
+  price_per_month: number;
+  bedrooms: number;
+  bathrooms: number;
+  area_sqft: number;
+  status: 'AVAILABLE' | 'RENTED' | 'MAINTENANCE';
+  image_url?: string;
+  created_at: string;
+  total_requests: number;
+  pending_requests: number;
+  approved_bookings: number;
+  avg_rating: number;
+  review_count: number;
+}
+
+/**
+ * Every property listed by one owner (any status), with booking and review counts.
+ * Aggregates are computed in separate subqueries so bookings x reviews do not multiply rows.
+ */
+export async function getOwnerProperties(ownerId: string): Promise<OwnerPropertyRow[]> {
+  const result = await query(
+    `SELECT
+       p.id, p.title, p.property_type, p.city, p.address, p.price_per_month,
+       p.bedrooms, p.bathrooms, p.area_sqft, p.status, p.image_url, p.created_at,
+       COALESCE(b.total_requests, 0)    AS total_requests,
+       COALESCE(b.pending_requests, 0)  AS pending_requests,
+       COALESCE(b.approved_bookings, 0) AS approved_bookings,
+       COALESCE(r.avg_rating, 0)        AS avg_rating,
+       COALESCE(r.review_count, 0)      AS review_count
+     FROM properties p
+     LEFT JOIN (
+       SELECT property_id,
+              COUNT(*)                                     AS total_requests,
+              COUNT(*) FILTER (WHERE status = 'PENDING')   AS pending_requests,
+              COUNT(*) FILTER (WHERE status = 'APPROVED')  AS approved_bookings
+       FROM bookings GROUP BY property_id
+     ) b ON b.property_id = p.id
+     LEFT JOIN (
+       SELECT property_id, ROUND(AVG(rating)::numeric, 1) AS avg_rating, COUNT(*) AS review_count
+       FROM reviews GROUP BY property_id
+     ) r ON r.property_id = p.id
+     WHERE p.owner_id = $1
+     ORDER BY p.created_at DESC`,
+    [ownerId]
+  );
+  return result.rows.map((row: any) => ({
+    ...row,
+    price_per_month: Number(row.price_per_month),
+    total_requests: Number(row.total_requests),
+    pending_requests: Number(row.pending_requests),
+    approved_bookings: Number(row.approved_bookings),
+    avg_rating: Number(row.avg_rating),
+    review_count: Number(row.review_count),
+  }));
+}
