@@ -41,7 +41,7 @@ export default function OwnerRevenuePage() {
       total,
       collected,
       outstanding: total - collected,
-      perProperty: [...map.values()].sort((a, b) => b.total - a.total),
+      perProperty: Array.from(map.values()).sort((a, b) => b.total - a.total),
     };
   }, [bookings]);
 
