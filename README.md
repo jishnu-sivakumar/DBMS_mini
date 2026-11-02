@@ -78,6 +78,8 @@ npm run db:seed             # users, listings, real MiniLM embeddings, sample bo
 ```
 The first `db:seed` downloads the ~23 MB `all-MiniLM-L6-v2` model once and caches it.
 
+The seed loads **58 listings in 15 cities** (rent from Rs 4,500 for a hostel bed to Rs 2,50,000 for a sea-facing penthouse; 23 listings are under Rs 20,000), 6 owners, 6 tenants, 1 admin, 44 reviews and 14 bookings in every status (some paid). The data lives in `scripts/seed-data.mjs`; photos are Unsplash images.
+
 ### 4. Run the app
 ```bash
 npm run dev      # http://localhost:3000
@@ -95,7 +97,7 @@ npm run build    # production build check
 You can also register a new Owner or Tenant at `/register` (nobody can self-register as Admin).
 
 ### 6. Try the full flow
-1. Log in as a tenant, search *"house where I can keep my dog"* on the home page, open a listing and **Request to book**.
+1. Log in as a tenant, search *"house where I can keep my dog"* on the home page, open a listing and **Request to book**. Budget, bedrooms and city can be typed straight into the sentence, e.g. *"homes under rent 20k"* or *"pet friendly 2BHK in Pune under 25k"*; the page shows what it understood as chips. (`npm run test:parser` checks this parsing.)
 2. Log in as that listing's owner, open **Owner Portal**, **Approve** the request (tabs: All / Pending / Approved / Rejected).
 3. Back as the tenant, open **My Bookings** and **Pay**; use **History** to see the audit trail.
 4. Make two overlapping requests for one property, approve one, then approve the other: the database trigger rejects it and the error message shows in the UI.
