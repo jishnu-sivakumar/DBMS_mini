@@ -113,7 +113,7 @@ FROM (
 ORDER BY avg_rent DESC
 LIMIT 1;
 
-\echo '===== C4. ALL: the property that is more expensive than every Bengaluru listing ====='
+\echo '===== C4. ALL: properties more expensive than every Bengaluru listing ====='
 SELECT title, city, price_per_month
 FROM properties
 WHERE price_per_month > ALL (SELECT price_per_month FROM properties WHERE city = 'Bengaluru');
@@ -254,7 +254,7 @@ LIMIT 3;
 SELECT title, city, ROUND(similarity_score::numeric, 3) AS similarity
 FROM fn_search_properties_semantic(
     (SELECT pe.embedding FROM property_embeddings pe JOIN properties pp ON pp.id = pe.property_id
-     WHERE pp.title LIKE 'Budget 1BHK%'),
+     WHERE pp.title LIKE 'Budget 1BHK Student%'),
     0.20, 3
 );
 
