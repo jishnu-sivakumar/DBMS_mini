@@ -17,6 +17,8 @@ import { Property } from '@/lib/services/property-service';
 export default function HomePage() {
   const [properties, setProperties] = useState<Property[]>([]);
   const [loading, setLoading] = useState(true);
+  const [cities, setCities] = useState<string[]>([]);
+  const [applied, setApplied] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCity, setSelectedCity] = useState('');
   const [selectedBedrooms, setSelectedBedrooms] = useState<number | ''>('');
@@ -46,6 +48,7 @@ export default function HomePage() {
       const data = await res.json();
       if (data.success) {
         setProperties(data.properties || []);
+        setApplied(data.applied || []);
       }
     } catch (err) {
       console.error('Failed to load listings:', err);
@@ -53,6 +56,14 @@ export default function HomePage() {
       setLoading(false);
     }
   };
+
+  // City dropdown is built from the cities that actually exist in the database
+  useEffect(() => {
+    fetch('/api/properties')
+      .then((r) => r.json())
+      .then((d) => setCities(d.cities || []))
+      .catch(() => setCities([]));
+  }, []);
 
   useEffect(() => {
     fetchProperties();
@@ -76,6 +87,7 @@ export default function HomePage() {
     setSelectedBedrooms('');
     setMaxPrice('');
     setActiveQueryPrompt(null);
+    setApplied([]);
     fetchProperties('', '', '', '');
   };
 
@@ -148,10 +160,11 @@ export default function HomePage() {
             className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
           >
             <option value="">All Cities</option>
-            <option value="Bengaluru">Bengaluru</option>
-            <option value="Mumbai">Mumbai</option>
-            <option value="Pune">Pune</option>
-            <option value="Hyderabad">Hyderabad</option>
+            {cities.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
           </select>
 
           {/* Bedrooms Filter */}
@@ -164,6 +177,8 @@ export default function HomePage() {
             <option value="1">1 BHK</option>
             <option value="2">2 BHK</option>
             <option value="3">3 BHK</option>
+            <option value="4">4 BHK</option>
+            <option value="5">5 BHK</option>
           </select>
 
           {/* Max Price Filter */}
@@ -173,10 +188,13 @@ export default function HomePage() {
             className="px-3 py-1.5 text-xs font-medium rounded-lg border border-slate-200 bg-slate-50 text-slate-700 focus:outline-none focus:ring-1 focus:ring-emerald-500"
           >
             <option value="">Max Budget</option>
+            <option value="10000">Under ₹10,000</option>
+            <option value="15000">Under ₹15,000</option>
             <option value="20000">Under ₹20,000</option>
             <option value="35000">Under ₹35,000</option>
             <option value="50000">Under ₹50,000</option>
             <option value="100000">Under ₹1,00,000</option>
+            <option value="300000">Under ₹3,00,000</option>
           </select>
         </div>
 
@@ -201,6 +219,19 @@ export default function HomePage() {
           <p className="text-xs text-slate-500">
             {loading ? 'Executing vector similarity query...' : `Showing ${properties.length} listings`}
           </p>
+          {applied.length > 0 && !loading && (
+            <div className="flex flex-wrap items-center gap-1.5 mt-2">
+              <span className="text-[11px] font-semibold text-slate-500">Understood from your search:</span>
+              {applied.map((chip) => (
+                <span
+                  key={chip}
+                  className="text-[11px] px-2 py-0.5 rounded-full bg-slate-900 text-white font-semibold"
+                >
+                  {chip}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         {activeQueryPrompt && (
           <div className="text-xs px-3 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1.5">
