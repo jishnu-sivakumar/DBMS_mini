@@ -33,6 +33,7 @@ export interface BookingRecord {
   tenant_id: string;
   tenant_name?: string;
   tenant_email?: string;
+  tenant_phone?: string;
   start_date: string;
   end_date: string;
   total_amount: number;
@@ -175,7 +176,8 @@ export async function getOwnerBookingRequests(ownerId: string): Promise<BookingR
   const result = await query<BookingRecord>(
     `SELECT ${BOOKING_COLUMNS},
       u.full_name AS tenant_name,
-      u.email AS tenant_email
+      u.email AS tenant_email,
+      u.phone AS tenant_phone
     FROM bookings b
     JOIN properties p ON b.property_id = p.id
     JOIN users u ON b.tenant_id = u.id
