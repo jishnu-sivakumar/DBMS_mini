@@ -191,17 +191,19 @@ export async function getOwnerBookingRequests(ownerId: string): Promise<BookingR
  */
 export async function updateBookingStatus(
   bookingId: string,
-  ownerId: string,
+  actorId: string,
+  actorRole: 'OWNER' | 'TENANT',
   newStatus: 'APPROVED' | 'REJECTED' | 'CANCELLED'
 ): Promise<{ success: boolean; message: string }> {
   return await withTransaction(async (client) => {
-    // Verify owner authorization
+    // Verify the actor is allowed to touch this booking (owner of the property, or the tenant)
     const checkRes = await client.query(
-      `SELECT b.id, b.status, p.owner_id 
+      `SELECT b.id, b.status
        FROM bookings b
        JOIN properties p ON b.property_id = p.id
-       WHERE b.id = $1 AND p.owner_id = $2`,
-      [bookingId, ownerId]
+       WHERE b.id = $1
+         AND (($3 = 'OWNER' AND p.owner_id = $2) OR ($3 = 'TENANT' AND b.tenant_id = $2))`,
+      [bookingId, actorId, actorRole]
     );
 
     if (checkRes.rows.length === 0) {

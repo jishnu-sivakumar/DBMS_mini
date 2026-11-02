@@ -1,50 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { updateBookingStatus } from '@/lib/services/booking-service';
-import { query } from '@/lib/db';
+import { requireRole, denyResponse } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * ============================================================================
- * BOOKING STATUS UPDATE (MEMBER 2 BOILERPLATE)
- * ============================================================================
- * Allows property owners to APPROVE or REJECT a booking request.
+ * Booking status update (Member 2)
+ * - OWNER  may set APPROVED or REJECTED on bookings for their own properties
+ * - TENANT may set CANCELLED on their own bookings
+ * Ownership is verified again inside the service layer.
  */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
+  const session = await requireRole('OWNER', 'TENANT');
+  if (!session) return denyResponse();
+
   try {
-    const bookingId = params.id;
-    const body = await request.json();
-    const { status, owner_id } = body;
+    const { status } = await request.json();
 
-    if (!['APPROVED', 'REJECTED', 'CANCELLED'].includes(status)) {
+    const allowed =
+      session.role === 'OWNER' ? ['APPROVED', 'REJECTED'] : ['CANCELLED'];
+    if (!allowed.includes(status)) {
       return NextResponse.json(
-        { success: false, error: 'Invalid booking status' },
-        { status: 400 }
+        { success: false, error: `As ${session.role.toLowerCase()} you can only set: ${allowed.join(', ')}` },
+        { status: 403 }
       );
     }
 
-    let ownerId = owner_id;
-    if (!ownerId) {
-      const ownerRes = await query(
-        `SELECT id FROM users WHERE role = 'OWNER' LIMIT 1`
-      );
-      ownerId = ownerRes.rows[0]?.id;
-    }
+    const result = await updateBookingStatus(params.id, session.userId, session.role, status);
 
-    const result = await updateBookingStatus(bookingId, ownerId, status);
-
-    return NextResponse.json({
-      success: true,
-      message: result.message,
-      assignedTo: 'Member 2 (Teammate)',
-    });
+    return NextResponse.json({ success: true, message: result.message });
   } catch (error: any) {
-    return NextResponse.json(
-      { success: false, error: error.message },
-      { status: 400 }
-    );
+    return NextResponse.json({ success: false, error: error.message }, { status: 400 });
   }
 }
