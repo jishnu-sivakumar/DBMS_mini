@@ -66,7 +66,7 @@ export default function NewPropertyPage() {
 
       setSuccess(true);
       setTimeout(() => {
-        router.push('/');
+        router.push('/dashboard/owner/properties');
       }, 1800);
     } catch (err: any) {
       setError(err.message || 'Error creating property listing');
@@ -107,7 +107,7 @@ export default function NewPropertyPage() {
             <CheckCircle2 className="w-16 h-16 text-emerald-600 mx-auto animate-bounce" />
             <h2 className="text-xl font-bold text-slate-800">Property Listed & Vectorized!</h2>
             <p className="text-xs text-slate-500">
-              Relational record created and pgvector embedding computed. Redirecting to search...
+              Relational record created and pgvector embedding computed. Taking you to My Properties...
             </p>
           </div>
         ) : (
