@@ -3,6 +3,7 @@ import {
   createBookingRequest,
   getTenantBookings,
   getOwnerBookingRequests,
+  getOwnerAnalyticsFor,
 } from '@/lib/services/booking-service';
 import { requireRole, denyResponse } from '@/lib/auth';
 
@@ -20,11 +21,15 @@ export async function GET() {
   if (!session) return denyResponse();
 
   try {
-    const bookings =
-      session.role === 'OWNER'
-        ? await getOwnerBookingRequests(session.userId)
-        : await getTenantBookings(session.userId);
+    if (session.role === 'OWNER') {
+      const [bookings, analytics] = await Promise.all([
+        getOwnerBookingRequests(session.userId),
+        getOwnerAnalyticsFor(session.userId), // reads view_owner_analytics
+      ]);
+      return NextResponse.json({ success: true, role: session.role, bookings, analytics });
+    }
 
+    const bookings = await getTenantBookings(session.userId);
     return NextResponse.json({ success: true, role: session.role, bookings });
   } catch (error: any) {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
