@@ -26,3 +26,8 @@
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Env files (secrets)
+.env
+.env.local
+!.env.example
