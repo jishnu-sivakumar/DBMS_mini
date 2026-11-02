@@ -4,7 +4,7 @@ import {
   createProperty,
   getAvailableCities,
 } from '@/lib/services/property-service';
-import { query } from '@/lib/db';
+import { requireRole, denyResponse } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,21 +47,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await requireRole('OWNER', 'ADMIN');
+  if (!session) return denyResponse();
+
   try {
     const body = await request.json();
-
-    // Default to first owner from database if not supplied (for demo simplicity)
-    let ownerId = body.owner_id;
-    if (!ownerId) {
-      const ownerRes = await query(
-        `SELECT id FROM users WHERE role = 'OWNER' LIMIT 1`
-      );
-      if (ownerRes.rows.length > 0) {
-        ownerId = ownerRes.rows[0].id;
-      } else {
-        throw new Error('No owner user found in database');
-      }
-    }
+    const ownerId = session.userId; // listing always belongs to the logged-in user
 
     if (!body.title || !body.description || !body.price_per_month || !body.city) {
       return NextResponse.json(
