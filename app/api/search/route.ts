@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { searchPropertiesSemantic } from '@/lib/services/property-service';
+import { searchProperties } from '@/lib/services/property-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +12,9 @@ export const dynamic = 'force-dynamic';
  * - city: Filter by city (e.g., "Bengaluru")
  * - maxPrice: Maximum monthly rent in INR
  * - bedrooms: Number of bedrooms (e.g., 2)
+ *
+ * Constraints written inside q ("under 20k", "2BHK", "in Pune") are parsed into exact
+ * SQL filters; see lib/query-parser.ts. Explicit params win over parsed ones.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -24,14 +27,18 @@ export async function GET(request: NextRequest) {
     const bedrooms = searchParams.get('bedrooms')
       ? Number(searchParams.get('bedrooms'))
       : undefined;
+    const minPrice = searchParams.get('minPrice')
+      ? Number(searchParams.get('minPrice'))
+      : undefined;
     const limit = searchParams.get('limit')
       ? Number(searchParams.get('limit'))
-      : 12;
+      : undefined; // service default: 30 semantic matches / 60 catalog rows
 
-    const properties = await searchPropertiesSemantic({
+    const { properties, applied, semanticText } = await searchProperties({
       query: q,
       city,
       maxPrice,
+      minPrice,
       bedrooms,
       limit,
     });
@@ -40,6 +47,8 @@ export async function GET(request: NextRequest) {
       success: true,
       total: properties.length,
       query: q,
+      applied,
+      semanticText,
       properties,
     });
   } catch (error: any) {
