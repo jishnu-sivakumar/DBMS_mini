@@ -101,7 +101,7 @@ Member 2 owns everything that happens after a tenant finds a listing: who is all
 8. **Hosted database support** (`DATABASE_SSL`, `docs/HOSTED_DATABASE.md`)
    - The same PostgreSQL schema can run on Supabase or Neon; the guide explains how to browse the data online.
 9. **Project report** (`docs/report/`)
-   - 52-page PDF and editable Word file with ER diagram, SQL and vector commands, screenshots, data dictionary and rubric status.
+   - 75-page PDF and editable Word file in the PES University report format (certificate, declaration, chapters 1 to 9) with ER diagram, SQL and vector commands, screenshots, data dictionary and rubric status.
 10. **SQL for the report** (`db/queries.sql`, `db/transactions_tests.sql`)
    - 30+ labelled queries and a transaction / negative test script (23 checks, all PASS).
 
