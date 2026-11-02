@@ -7,6 +7,8 @@ declare global {
 }
 
 const connectionString = process.env.DATABASE_URL;
+// Hosted databases (Supabase, Neon, ...) require TLS: set DATABASE_SSL=true in .env
+const ssl = process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : undefined;
 if (!connectionString) {
   throw new Error('DATABASE_URL is not set (copy .env.example to .env)');
 }
@@ -15,6 +17,7 @@ export const pool: Pool =
   global._pgPool ||
   new Pool({
     connectionString,
+    ssl,
     max: 20, // Connection pool size
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 5000,
