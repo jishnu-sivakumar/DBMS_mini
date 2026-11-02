@@ -105,6 +105,8 @@ async function seed() {
 
     // 1. Clear existing data
     console.log('Clearing old sample records...');
+    await client.query('DELETE FROM payments');
+    await client.query('DELETE FROM booking_audit');
     await client.query('DELETE FROM reviews');
     await client.query('DELETE FROM bookings');
     await client.query('DELETE FROM property_embeddings');
