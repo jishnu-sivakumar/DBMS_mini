@@ -116,7 +116,7 @@ export async function searchProperties(filters: SearchFilters): Promise<SearchRe
       id, title, description, property_type, price_per_month, bedrooms, bathrooms,
       area_sqft, address, city, status, amenities, image_url, owner_name, avg_rating,
       ROUND((similarity_score * 100)::numeric, 1)::float AS similarity_score
-    FROM fn_search_properties_semantic($1::text::vector, 0.10, $2, $3, $4, $5)
+    FROM fn_search_properties_semantic($1::text::vector, 0.20, $2, $3, $4, $5)
     WHERE ($6::numeric IS NULL OR price_per_month >= $6)
   `;
   const result = await query<Property>(sql, [
