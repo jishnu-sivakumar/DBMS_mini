@@ -68,32 +68,33 @@ Member 1 was responsible for establishing the database foundations, dual-paradig
 
 ---
 
-## 📌 Member 2: Rental Lifecycle, Booking Concurrency & Owner Dashboard
+## 📌 Member 2: Authentication, Rental Lifecycle, Payments & SQL Test Suite
 
-### Status: 🛠️ BOILERPLATE & STUBS PREPARED (Ready for Teammate)
+### Status: ✅ IMPLEMENTED & TESTED
 
-Member 2 is responsible for the transactional and concurrency-critical aspects of the rental platform: managing booking lifecycles, preventing race conditions, and owner approvals.
+Member 2 owns everything that happens after a tenant finds a listing: who is allowed to do what, how a booking moves from request to payment, and how the database proves it stays consistent. The work was delivered as pull requests from separate branches (`feature/auth`, `feature/booking-lifecycle`, `feature/payments-audit`, `feature/real-embeddings`, `feature/sql-demos`, `docs/member2`).
 
-### Deliverables & Boilerplates Prepared for Member 2:
-1. **Concurrency Service Boilerplate (`lib/services/booking-service.ts`)**:
-   - Prepared transaction logic with row-level locking (`SELECT ... FOR UPDATE`) to prevent race conditions during simultaneous bookings.
-   - Pre-integrated call to stored procedure `fn_check_booking_conflict(p_property_id, p_start_date, p_end_date)`.
-   - Stubs for `getTenantBookings()` and `getOwnerBookingRequests()`.
-   - Booking state machine stub `updateBookingStatus(id, status, ownerId)`.
-
-2. **Database Trigger Integration (`db/schema.sql`)**:
-   - Provided trigger `trg_validate_booking_overlap` executing `fn_trg_prevent_double_booking()` before `INSERT` or `UPDATE` on `bookings` to ensure database-level consistency.
-
-3. **Owner Management Dashboard (`app/dashboard/owner/page.tsx`)**:
-   - Functional UI layout displaying owner analytics metrics from `view_owner_analytics`.
-   - Incoming booking requests table with working "Approve" and "Reject" buttons.
-   - Dedicated checklist card highlighting Member 2's specific testing tasks.
-
-4. **Tenant Dashboard (`app/dashboard/tenant/page.tsx`)**:
-   - Tenant booking history UI displaying request status (`PENDING`, `APPROVED`, `REJECTED`).
-
-5. **API Route Handlers (`app/api/bookings/route.ts` & `app/api/bookings/[id]/route.ts`)**:
-   - Working endpoints accepting booking requests and updating statuses.
+### Deliverables
+1. **Authentication & roles** (`lib/jwt.ts`, `lib/auth.ts`, `middleware.ts`, `app/api/auth/*`, `app/login`, `app/register`, `components/Navbar.tsx`)
+   - bcrypt password hashes, JWT (jose) in an httpOnly cookie, roles `OWNER` / `TENANT` / `ADMIN`.
+   - Middleware protects `/dashboard/owner`, `/dashboard/tenant`, `/properties/new`; every API route re-checks the role.
+   - The old "pick the first owner/tenant" demo fallbacks were removed; the session user is always used.
+   - Demo users are seeded with bcrypt hashes; DB `CHECK` constraints validate email and phone.
+2. **Booking lifecycle** (`lib/services/booking-service.ts`, `app/api/bookings/**`)
+   - Date validation, property row lock (`SELECT ... FOR UPDATE`), `fn_check_booking_conflict`, duplicate-request guard.
+   - Owner approve / reject, tenant cancel; the booking row is locked during status changes.
+   - `trg_validate_booking_transition` enforces the state machine in the database itself; `trg_validate_booking_overlap` rejects overlapping approvals and its message is displayed in the Owner Portal.
+3. **Dashboards** (`app/dashboard/owner`, `app/dashboard/tenant`)
+   - Owner: All / Pending / Approved / Rejected tabs, KPI cards from `view_owner_analytics`, payment column.
+   - Tenant: sees only their own bookings; Cancel, Pay (UPI / Card / Net banking) and History actions.
+4. **Payments & audit** (`db/schema.sql`, `payBooking()`, `/api/bookings/[id]/pay`)
+   - `payments` table (FK to bookings, `amount CHECK > 0`, method, status, `paid_at`), partial unique index (one `PAID` payment per booking).
+   - Triggers: stamp `paid_at` and validate; audit every booking status change into `booking_audit`; auto-refund on cancel.
+5. **Real embeddings** (`lib/embeddings.ts`, `next.config.mjs`, `scripts/seed.mjs`)
+   - Keyword-hash vectorizer replaced by real `all-MiniLM-L6-v2` (mean pooling, normalised, 384 dims); optional OpenAI path kept.
+   - Listing text now puts amenities before the description, so *"house where I can keep my dog"* returns the pet-friendly villa first.
+6. **SQL for the report** (`db/queries.sql`, `db/transactions_tests.sql`)
+   - 30+ labelled queries and a transaction / negative test script (23 checks, all PASS).
 
 ---
 
@@ -104,8 +105,10 @@ Member 2 is responsible for the transactional and concurrency-critical aspects o
 | **SQL Database (PostgreSQL)** | Schema design, DDL tables, types, B-Tree indexes | Booking relational workflows & tenant relationships |
 | **Vector Database (`pgvector`)** | 384-dim vector embeddings, HNSW index, cosine similarity | Consumes catalog listings for booking requests |
 | **Advanced Feature 1: Vectors** | pgvector cosine similarity search (`<=>`) | - |
-| **Advanced Feature 2: Transactions** | Property creation + embedding insertion transaction | Concurrency-controlled booking transaction (`FOR UPDATE`) |
+| **Advanced Feature 2: Transactions** | Property creation + embedding insertion transaction | Concurrency-controlled booking transaction (`FOR UPDATE`), atomic payment, COMMIT / ROLLBACK / SAVEPOINT demos |
 | **Advanced Feature 3: Stored Procedures**| `fn_search_properties_semantic` | `fn_check_booking_conflict` |
-| **Advanced Feature 4: Triggers** | `trg_properties_timestamp` auto-updated timestamp | `trg_validate_booking_overlap` double booking guard |
+| **Advanced Feature 4: Triggers** | `trg_properties_timestamp` auto-updated timestamp | `trg_validate_booking_overlap`, `trg_validate_booking_transition`, `trg_payment_stamp_and_validate`, `trg_audit_booking_status`, `trg_refund_on_cancel` |
 | **Advanced Feature 5: Views** | `view_property_catalog`, `view_owner_analytics` | Consumes views inside Owner Portal |
-| **Web Interface (Next.js)** | Search bar, Hybrid Filters, Listing form, Cards | Owner Dashboard, Tenant Bookings page |
+| **Web Interface (Next.js)** | Search bar, Hybrid Filters, Listing form, Cards | Login / register, Owner Dashboard, Tenant dashboard (cancel, pay, history) |
+| **Authentication (2+ roles)** | - | bcrypt + JWT cookie, `OWNER` / `TENANT` / `ADMIN`, middleware + per-route role checks |
+| **Constraints & testing** | Core CHECK / FK constraints | `users` CHECKs, `payments` constraints, 22 negative tests in `db/transactions_tests.sql` |

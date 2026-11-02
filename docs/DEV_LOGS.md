@@ -87,6 +87,51 @@
 
 ---
 
-## 🛠️ Phase 5: Team Handoff & Future Scope
-- **Member 1 (Current Implementer)** has finished all database core architecture, pgvector pipelines, seed generation, and the search frontend.
-- **Member 2 (Teammate)** has received clean boilerplates with TODOs in `lib/services/booking-service.ts`, `app/dashboard/owner/page.tsx`, and `docs/MEMBER_2_GUIDE.md`.
+---
+
+## 🛠️ Phase 5: Team Handoff (Member 1)
+- **Member 1** finished the database core, pgvector pipelines, seed generation, and the search frontend.
+- **Member 2** received boilerplates for the booking service and dashboards; Phases 6 to 11 below record that work.
+
+---
+
+# Member 2 Logs
+
+**Date:** November 2, 2026
+**Environment:** Windows 11, Docker (`pgvector/pgvector:pg16`, DB on port 5433 because 5432 was taken), Node.js v24, Next.js 14.2.35
+
+## 🛠️ Phase 6: Authentication (`feature/auth`, PR #1)
+- Moved DB and JWT configuration to environment variables; `.env` is git-ignored; `docker-compose.yml` reads credentials from env.
+- Added `lib/jwt.ts` (jose, edge-safe) and `lib/auth.ts` (`getSession`, `requireRole`); the session cookie is httpOnly, SameSite=Lax.
+- Added `/api/auth/register|login|logout|me`, `middleware.ts`, login and register pages, and a role-aware navbar.
+- Removed the "first owner / first tenant" fallbacks from `/api/bookings` and `/api/properties`.
+- Seed now inserts 6 users (3 owners, 2 tenants, 1 admin) with bcrypt hashes. Added `users_email_format` and `users_phone_format` CHECK constraints.
+- **Verified with curl:** unauthenticated dashboard -> 307 to `/login`; unauthenticated API -> 401; wrong password -> 401; tenant on `/dashboard/owner` -> redirect; tenant `POST /api/properties` -> 403; duplicate email -> 400; self-registering as ADMIN -> 400.
+- **Debugging note:** a stale `next start` process kept serving old code on the same port, which made new checks look broken. Confirm the new server actually started (look for `EADDRINUSE` in its log) before judging test results.
+
+## 🛠️ Phase 7: Booking lifecycle (`feature/booking-lifecycle`, PR #2)
+- `createBookingRequest`: validates dates (not in the past, end after start), locks the property with `FOR UPDATE`, calls `fn_check_booking_conflict`, rejects duplicate live requests by the same tenant.
+- `updateBookingStatus`: locks the booking row, checks ownership, then updates. Added `trg_validate_booking_transition` so the state machine also holds for direct SQL.
+- Owner dashboard tabs (All / Pending / Approved / Rejected); the tenant sees only their rows and can cancel.
+- **Verified:** two overlapping PENDING requests; approving the first works; approving the second returns `Double booking conflict: Property ... is already booked for date range ...` from `trg_validate_booking_overlap`, displayed in the UI. Wrong owner and other tenants get "not found or unauthorized"; cancelling twice is refused; direct SQL `APPROVED -> REJECTED` is blocked by the new trigger.
+
+## 🛠️ Phase 8: Payments and audit (`feature/payments-audit`, PR #3)
+- Added `payments` (amount `CHECK > 0`, `paid_at`, unique transaction ref) and `booking_audit`.
+- Triggers: `trg_payment_stamp_and_validate`, `trg_audit_booking_status` (records the acting user through a transaction-local `app.user_id` setting), `trg_refund_on_cancel`.
+- `payBooking()` runs in a transaction with a row lock. `db/schema.sql` was run twice in a row to confirm it is re-runnable.
+- **Verified:** pay before approval refused; other tenant and owner cannot pay; invalid method refused; pay once succeeds; second pay refused; cancel refunds the payment; history lists actors.
+- **Bug found while testing:** `payment_status` was missing from the booking list because a multi-line text patch silently did not match (CRLF line endings). Fixed in the same PR.
+
+## 🛠️ Phase 9: Real embeddings (`feature/real-embeddings`, PR #4)
+- Replaced the keyword-hash vectorizer with `all-MiniLM-L6-v2` through `@huggingface/transformers` (mean pooling, normalised). `next.config.mjs` externalises the ONNX runtime. The seed script imports the same module so stored and query vectors always match.
+- First result for *"house where I can keep my dog"* was the wrong listing (family home 29.9% vs villa 27.5%). Compared four ways of building the indexed text; putting amenities directly after the title fixed it without hurting the other queries (villa 35.2% first, family home 32.6% second).
+- Spot checks after re-seeding: *quiet place near tech park with balcony* -> Serene 2BHK (56.5%); *cheap flat for a student near metro* -> Budget 1BHK; *luxury penthouse with swimming pool* -> Penthouse (66.1%); *fully furnished studio for software engineer* -> Hitec City studio.
+- **Known limitation:** *"apartment that allows pets"* ranks a non-pet studio above the pet-friendly listings; the model is small and the seed set only has 6 listings.
+
+## 🛠️ Phase 10: SQL demos and tests (`feature/sql-demos`, PR #5)
+- `db/queries.sql`: joins, GROUP BY / HAVING, nested and correlated subqueries, window function, CTE, UNION, UPDATE / DELETE inside `BEGIN ... ROLLBACK`, views, stored functions, pgvector similarity, full-text search. Runs with `ON_ERROR_STOP` and is repeatable.
+- `db/transactions_tests.sql`: COMMIT, ROLLBACK, SAVEPOINT, atomicity, `FOR UPDATE`, audit / payment / refund triggers, and 22 negative tests with a PASS/FAIL summary.
+- First run reported 2 failures, both wrong expectations in the tests (the payment trigger fires before the FK check; `ON DELETE RESTRICT` reports SQLSTATE 23503). Tests were corrected; final result 23/23 PASS on two consecutive runs with no leftover rows.
+
+## 🛠️ Phase 11: Documentation (`docs/member2`)
+- Updated `README.md` (setup, env vars, demo accounts, full-flow walkthrough, SQL demo commands), `docs/TEAM_DIVISION.md`, and this log.
