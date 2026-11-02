@@ -149,7 +149,9 @@ const BOOKING_COLUMNS = `
       b.total_amount,
       b.status,
       b.special_requests,
-      b.created_at`;
+      b.created_at,
+      (SELECT pm.status FROM payments pm WHERE pm.booking_id = b.id
+       ORDER BY pm.created_at DESC LIMIT 1) AS payment_status`;
 
 /**
  * 2. Bookings of one tenant (tenants only ever see their own rows).
