@@ -10,6 +10,7 @@
     "lint": "next lint",
     "db:init": "node --env-file-if-exists=.env scripts/init-db.mjs",
     "db:seed": "node --env-file-if-exists=.env scripts/seed.mjs",
+    "db:setup": "npm run db:init && npm run db:seed",
     "test:parser": "node scripts/test-parser.mjs",
     "postinstall": "node -e \"import fs from 'fs'; try { const p='node_modules/@huggingface/transformers/package.json'; const j=JSON.parse(fs.readFileSync(p)); j.exports.node.import.default='./dist/transformers.js'; fs.writeFileSync(p, JSON.stringify(j,null,2)); } catch(e){}\""
   },
