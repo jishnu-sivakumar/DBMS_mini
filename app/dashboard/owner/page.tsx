@@ -172,6 +172,7 @@ export default function OwnerDashboardPage() {
                   <th className="py-3 px-4">Rental Duration</th>
                   <th className="py-3 px-4">Total Rent</th>
                   <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Payment</th>
                   <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
@@ -197,6 +198,17 @@ export default function OwnerDashboardPage() {
                       >
                         {booking.status}
                       </span>
+                    </td>
+                    <td className="py-3 px-4 text-[11px] font-semibold">
+                      {booking.payment_status === 'PAID' ? (
+                        <span className="text-teal-700">Paid</span>
+                      ) : booking.payment_status === 'REFUNDED' ? (
+                        <span className="text-slate-500">Refunded</span>
+                      ) : booking.status === 'APPROVED' ? (
+                        <span className="text-amber-700">Awaiting payment</span>
+                      ) : (
+                        <span className="text-slate-300">-</span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-right space-x-2">
                       {booking.status === 'PENDING' ? (

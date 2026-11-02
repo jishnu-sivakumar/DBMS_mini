@@ -15,6 +15,8 @@ export default function TenantDashboardPage() {
   const [bookings, setBookings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [method, setMethod] = useState<Record<string, string>>({});
+  const [history, setHistory] = useState<Record<string, any>>({});
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -53,6 +55,40 @@ export default function TenantDashboardPage() {
     } finally {
       setBusyId(null);
     }
+  };
+
+  const pay = async (id: string) => {
+    setBusyId(id);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/bookings/${id}/pay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ method: method[id] || 'UPI' }),
+      });
+      const data = await res.json();
+      setMessage(
+        res.ok
+          ? { type: 'success', text: `Payment successful. Reference ${data.transactionRef}` }
+          : { type: 'error', text: data.error || 'Payment failed' }
+      );
+      load();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const toggleHistory = async (id: string) => {
+    if (history[id]) {
+      setHistory((h) => {
+        const { [id]: _drop, ...rest } = h;
+        return rest;
+      });
+      return;
+    }
+    const res = await fetch(`/api/bookings/${id}`);
+    const data = await res.json();
+    if (data.success) setHistory((h) => ({ ...h, [id]: data }));
   };
 
   return (
@@ -129,6 +165,40 @@ export default function TenantDashboardPage() {
                   >
                     {b.status}
                   </span>
+                  {b.payment_status === 'PAID' && (
+                    <div>
+                      <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-teal-100 text-teal-800">
+                        Paid
+                      </span>
+                    </div>
+                  )}
+                  {b.payment_status === 'REFUNDED' && (
+                    <div>
+                      <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-slate-200 text-slate-700">
+                        Refunded
+                      </span>
+                    </div>
+                  )}
+                  {b.status === 'APPROVED' && b.payment_status !== 'PAID' && (
+                    <div className="flex items-center gap-2 sm:justify-end">
+                      <select
+                        value={method[b.id] || 'UPI'}
+                        onChange={(e) => setMethod((m) => ({ ...m, [b.id]: e.target.value }))}
+                        className="text-[11px] rounded-lg border border-slate-200 px-2 py-1 bg-white"
+                      >
+                        <option value="UPI">UPI</option>
+                        <option value="CARD">Card</option>
+                        <option value="NET_BANKING">Net banking</option>
+                      </select>
+                      <button
+                        disabled={busyId === b.id}
+                        onClick={() => pay(b.id)}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 font-semibold text-[11px] transition-colors disabled:opacity-50"
+                      >
+                        Pay ₹{Number(b.total_amount).toLocaleString('en-IN')}
+                      </button>
+                    </div>
+                  )}
                   {(b.status === 'PENDING' || b.status === 'APPROVED') && (
                     <div>
                       <button
@@ -139,6 +209,29 @@ export default function TenantDashboardPage() {
                         Cancel booking
                       </button>
                     </div>
+                  )}
+                  <div>
+                    <button
+                      onClick={() => toggleHistory(b.id)}
+                      className="text-[11px] text-slate-500 hover:text-slate-900 underline"
+                    >
+                      {history[b.id] ? 'Hide history' : 'History'}
+                    </button>
+                  </div>
+                  {history[b.id] && (
+                    <ul className="text-[11px] text-slate-500 sm:text-right space-y-0.5">
+                      {history[b.id].audit.map((a: any, i: number) => (
+                        <li key={i}>
+                          {a.old_status ? `${a.old_status} → ${a.new_status}` : `Created as ${a.new_status}`} ·{' '}
+                          {new Date(a.changed_at).toLocaleString()}
+                        </li>
+                      ))}
+                      {history[b.id].payments.map((p: any, i: number) => (
+                        <li key={`p${i}`}>
+                          Payment {p.status} via {p.method} · {p.transaction_ref}
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </div>
               </div>

@@ -11,6 +11,8 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 2. Drop existing objects for clean migrations (optional in production)
 DROP VIEW IF EXISTS view_owner_analytics CASCADE;
 DROP VIEW IF EXISTS view_property_catalog CASCADE;
+DROP TABLE IF EXISTS booking_audit CASCADE;
+DROP TABLE IF EXISTS payments CASCADE;
 DROP TABLE IF EXISTS reviews CASCADE;
 DROP TABLE IF EXISTS bookings CASCADE;
 DROP TABLE IF EXISTS property_embeddings CASCADE;
@@ -19,11 +21,15 @@ DROP TABLE IF EXISTS users CASCADE;
 DROP TYPE IF EXISTS user_role CASCADE;
 DROP TYPE IF EXISTS property_status CASCADE;
 DROP TYPE IF EXISTS booking_status CASCADE;
+DROP TYPE IF EXISTS payment_method CASCADE;
+DROP TYPE IF EXISTS payment_status CASCADE;
 
 -- 3. Custom Enumerations / Domain Types
 CREATE TYPE user_role AS ENUM ('OWNER', 'TENANT', 'ADMIN');
 CREATE TYPE property_status AS ENUM ('AVAILABLE', 'RENTED', 'MAINTENANCE');
 CREATE TYPE booking_status AS ENUM ('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED');
+CREATE TYPE payment_method AS ENUM ('UPI', 'CARD', 'NET_BANKING');
+CREATE TYPE payment_status AS ENUM ('PAID', 'FAILED', 'REFUNDED');
 
 -- 4. Users Table
 CREATE TABLE users (
@@ -99,6 +105,35 @@ CREATE TABLE reviews (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT unique_tenant_property_review UNIQUE(property_id, tenant_id)
 );
+
+
+-- 9. Payments Table (Member 2): one PAID payment per approved booking
+CREATE TABLE payments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    booking_id UUID NOT NULL REFERENCES bookings(id) ON DELETE RESTRICT,
+    amount NUMERIC(10, 2) NOT NULL CHECK (amount > 0),
+    method payment_method NOT NULL,
+    status payment_status NOT NULL DEFAULT 'PAID',
+    transaction_ref VARCHAR(40) NOT NULL UNIQUE
+        DEFAULT ('TXN-' || upper(substr(md5(random()::text || clock_timestamp()::text), 1, 12))),
+    paid_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT payments_paid_has_timestamp CHECK (status <> 'PAID' OR paid_at IS NOT NULL)
+);
+-- A booking can only be paid once (REFUNDED / FAILED rows do not block a new attempt)
+CREATE UNIQUE INDEX uq_payments_one_paid_per_booking ON payments(booking_id) WHERE status = 'PAID';
+CREATE INDEX idx_payments_booking ON payments(booking_id);
+
+-- 10. Booking Audit Log (Member 2): written only by trigger
+CREATE TABLE booking_audit (
+    id BIGSERIAL PRIMARY KEY,
+    booking_id UUID NOT NULL,
+    old_status booking_status,
+    new_status booking_status NOT NULL,
+    changed_by UUID,
+    changed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_booking_audit_booking ON booking_audit(booking_id, changed_at);
 
 -- ============================================================================
 -- ADVANCED DATABASE FEATURES
@@ -333,3 +368,79 @@ CREATE TRIGGER trg_validate_booking_transition
 BEFORE UPDATE OF status ON bookings
 FOR EACH ROW
 EXECUTE FUNCTION fn_trg_validate_booking_transition();
+
+
+-- Trigger 5: Stamp paid_at and validate payments (BEFORE INSERT/UPDATE on payments)
+--   * paid_at is set automatically when status becomes PAID
+--   * a PAID payment is only allowed for an APPROVED booking and must equal total_amount
+CREATE OR REPLACE FUNCTION fn_trg_payment_stamp_and_validate()
+RETURNS TRIGGER AS $$
+DECLARE
+    b_status booking_status;
+    b_total NUMERIC(10, 2);
+BEGIN
+    IF NEW.status = 'PAID' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'PAID') THEN
+        SELECT status, total_amount INTO b_status, b_total FROM bookings WHERE id = NEW.booking_id;
+        IF b_status IS DISTINCT FROM 'APPROVED' THEN
+            RAISE EXCEPTION 'Payment rejected: booking % is %, only APPROVED bookings can be paid',
+                NEW.booking_id, COALESCE(b_status::text, 'missing');
+        END IF;
+        IF NEW.amount <> b_total THEN
+            RAISE EXCEPTION 'Payment rejected: amount % does not match booking total %', NEW.amount, b_total;
+        END IF;
+        NEW.paid_at := CURRENT_TIMESTAMP;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_payment_stamp_and_validate
+BEFORE INSERT OR UPDATE ON payments
+FOR EACH ROW
+EXECUTE FUNCTION fn_trg_payment_stamp_and_validate();
+
+-- Trigger 6: Audit every booking status change (AFTER INSERT / UPDATE OF status)
+--   The application sets app.user_id (set_config, transaction-local) so changed_by is recorded.
+CREATE OR REPLACE FUNCTION fn_trg_audit_booking_status()
+RETURNS TRIGGER AS $$
+DECLARE
+    actor UUID;
+BEGIN
+    BEGIN
+        actor := NULLIF(current_setting('app.user_id', true), '')::uuid;
+    EXCEPTION WHEN invalid_text_representation THEN
+        actor := NULL;
+    END;
+
+    IF TG_OP = 'INSERT' THEN
+        INSERT INTO booking_audit (booking_id, old_status, new_status, changed_by)
+        VALUES (NEW.id, NULL, NEW.status, COALESCE(actor, NEW.tenant_id));
+    ELSIF NEW.status IS DISTINCT FROM OLD.status THEN
+        INSERT INTO booking_audit (booking_id, old_status, new_status, changed_by)
+        VALUES (NEW.id, OLD.status, NEW.status, actor);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_audit_booking_status
+AFTER INSERT OR UPDATE OF status ON bookings
+FOR EACH ROW
+EXECUTE FUNCTION fn_trg_audit_booking_status();
+
+-- Trigger 7: Refund the payment automatically when a paid booking is cancelled
+CREATE OR REPLACE FUNCTION fn_trg_refund_on_cancel()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.status = 'CANCELLED' AND OLD.status <> 'CANCELLED' THEN
+        UPDATE payments SET status = 'REFUNDED'
+        WHERE booking_id = NEW.id AND status = 'PAID';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_refund_on_cancel
+AFTER UPDATE OF status ON bookings
+FOR EACH ROW
+EXECUTE FUNCTION fn_trg_refund_on_cancel();
