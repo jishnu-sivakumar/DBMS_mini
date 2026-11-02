@@ -29,7 +29,7 @@ export async function PATCH(
       );
     }
 
-    const result = await updateBookingStatus(params.id, session.userId, session.role, status);
+    const result = await updateBookingStatus(params.id, session.userId, session.role as 'OWNER' | 'TENANT', status);
 
     return NextResponse.json({ success: true, message: result.message });
   } catch (error: any) {
