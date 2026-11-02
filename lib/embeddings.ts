@@ -103,10 +103,13 @@ export function buildPropertySearchText(property: {
   address: string;
   amenities?: string[];
 }): string {
+  // Amenities go right after the title: short, high-signal facts ("Pet Friendly") get
+  // diluted when they sit at the end of a long description, which hurt queries like
+  // "house where I can keep my dog".
   const amenitiesStr =
     property.amenities && property.amenities.length > 0
       ? `Amenities: ${property.amenities.join(', ')}.`
       : '';
 
-  return `${property.title}. ${property.description}. Type: ${property.bedrooms} BHK ${property.property_type} in ${property.city}, located at ${property.address}. ${amenitiesStr}`.trim();
+  return `${property.title}. ${amenitiesStr} ${property.description}`.replace(/\s+/g, ' ').trim();
 }
