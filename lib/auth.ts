@@ -35,6 +35,6 @@ export async function setSessionCookie(res: NextResponse, s: Session) {
     sameSite: 'lax',
     path: '/',
     maxAge: COOKIE_MAX_AGE,
-    secure: process.env.NODE_ENV === 'production',
+    secure: process.env.COOKIE_SECURE === 'true', // enable when served over HTTPS
   });
 }
