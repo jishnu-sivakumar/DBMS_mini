@@ -1,23 +1,27 @@
 /**
  * ============================================================================
- * BOOKING & RENTAL MANAGEMENT SERVICE
- * Assigned to: MEMBER 2 (Teammate Scope)
+ * BOOKING & RENTAL MANAGEMENT SERVICE (Member 2)
  * ============================================================================
- * 
- * Responsibilities for Member 2:
- * 1. ACID Transaction implementation for rental booking creation.
- * 2. Concurrency control: Row-level locking ('SELECT ... FOR UPDATE') to prevent double-booking.
- * 3. Booking approval state machine: PENDING -> APPROVED | REJECTED | CANCELLED.
- * 4. Stored function integration: 'fn_check_booking_conflict' to detect overlapping dates.
+ *
+ * 1. ACID transaction for booking creation.
+ * 2. Concurrency control: row-level lock (SELECT ... FOR UPDATE) on the property.
+ * 3. State machine: PENDING -> APPROVED | REJECTED | CANCELLED, APPROVED -> CANCELLED
+ *    (also enforced in the DB by trg_validate_booking_transition).
+ * 4. Overlap protection: fn_check_booking_conflict + trg_validate_booking_overlap.
+ *    The trigger's exception text is passed straight back to the UI.
+ *
+ * All SQL is parameterised.
  */
 
 import { query, withTransaction } from '@/lib/db';
+
+export type BookingStatus = 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
 
 export interface BookingRequestInput {
   property_id: string;
   tenant_id: string;
   start_date: string; // YYYY-MM-DD
-  end_date: string;   // YYYY-MM-DD
+  end_date: string; // YYYY-MM-DD
   special_requests?: string;
 }
 
@@ -29,67 +33,86 @@ export interface BookingRecord {
   tenant_id: string;
   tenant_name?: string;
   tenant_email?: string;
-  owner_id?: string;
   start_date: string;
   end_date: string;
   total_amount: number;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  status: BookingStatus;
   special_requests?: string;
   created_at: string;
+  payment_status?: string | null;
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function parseDate(label: string, value: string): Date {
+  if (!ISO_DATE.test(value)) throw new Error(`${label} must be a valid date (YYYY-MM-DD)`);
+  const d = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) throw new Error(`${label} must be a valid date (YYYY-MM-DD)`);
+  return d;
 }
 
 /**
- * ----------------------------------------------------------------------------
- * 1. Create a Rental Booking Request (Transactional Concurrency)
- * ----------------------------------------------------------------------------
- * TODO for Member 2:
- * - Execute inside an ACID transaction block using `withTransaction`.
- * - Lock the property row with `FOR UPDATE` to serialize concurrent requests.
- * - Call `fn_check_booking_conflict(property_id, start_date, end_date)`.
- * - Compute `total_amount = (months between dates) * price_per_month`.
- * - Insert into `bookings` with status 'PENDING'.
+ * 1. Create a rental booking request (transactional, row-locked).
  */
 export async function createBookingRequest(
   data: BookingRequestInput
 ): Promise<{ success: boolean; bookingId?: string; message: string }> {
+  const start = parseDate('Start date', data.start_date);
+  const end = parseDate('End date', data.end_date);
+  if (end <= start) throw new Error('End date must be after the start date');
+
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  if (start < today) throw new Error('Start date cannot be in the past');
+
   return await withTransaction(async (client) => {
-    // Step 1: Concurrency Control - Lock the property record
+    // Step 1: lock the property row so concurrent requests are serialised
     const propCheck = await client.query(
-      `SELECT id, price_per_month, status 
-       FROM properties 
-       WHERE id = $1 
+      `SELECT id, price_per_month, status, owner_id
+       FROM properties
+       WHERE id = $1
        FOR UPDATE`,
       [data.property_id]
     );
 
-    if (propCheck.rows.length === 0) {
-      throw new Error('Property not found');
-    }
+    if (propCheck.rows.length === 0) throw new Error('Property not found');
 
     const property = propCheck.rows[0];
+    if (property.owner_id === data.tenant_id) {
+      throw new Error('You cannot book your own property');
+    }
     if (property.status !== 'AVAILABLE') {
       throw new Error(`Property is currently ${property.status} and cannot be booked`);
     }
 
-    // Step 2: Date conflict check using stored procedure
+    // Step 2: date conflict check against already APPROVED bookings (stored function)
     const conflictCheck = await client.query(
       `SELECT fn_check_booking_conflict($1, $2::date, $3::date) AS has_conflict`,
       [data.property_id, data.start_date, data.end_date]
     );
-
     if (conflictCheck.rows[0]?.has_conflict) {
       throw new Error('Property has an overlapping confirmed booking for these dates');
     }
 
-    // Step 3: Calculate duration and total rental amount
-    const startDate = new Date(data.start_date);
-    const endDate = new Date(data.end_date);
-    const diffTime = Math.abs(endDate.getTime() - startDate.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    const months = Math.max(1, Math.round(diffDays / 30));
+    // Step 3: a tenant may not hold two live requests for overlapping dates on one property
+    const dup = await client.query(
+      `SELECT 1 FROM bookings
+       WHERE property_id = $1 AND tenant_id = $2
+         AND status IN ('PENDING', 'APPROVED')
+         AND (start_date, end_date) OVERLAPS ($3::date, $4::date)
+       LIMIT 1`,
+      [data.property_id, data.tenant_id, data.start_date, data.end_date]
+    );
+    if (dup.rows.length > 0) {
+      throw new Error('You already have an active request for these dates on this property');
+    }
+
+    // Step 4: total = price_per_month * months (30-day blocks, minimum 1)
+    const days = Math.round((end.getTime() - start.getTime()) / 86_400_000);
+    const months = Math.max(1, Math.round(days / 30));
     const totalAmount = Number(property.price_per_month) * months;
 
-    // Step 4: Insert booking record
+    // Step 5: insert as PENDING
     const insertRes = await client.query(
       `INSERT INTO bookings (
         property_id, tenant_id, start_date, end_date, total_amount, status, special_requests
@@ -101,7 +124,7 @@ export async function createBookingRequest(
         data.start_date,
         data.end_date,
         totalAmount,
-        data.special_requests || null,
+        data.special_requests?.trim() || null,
       ]
     );
 
@@ -113,62 +136,42 @@ export async function createBookingRequest(
   });
 }
 
-/**
- * ----------------------------------------------------------------------------
- * 2. Get Bookings for a Tenant (Tenant History)
- * ----------------------------------------------------------------------------
- * TODO for Member 2:
- * - Query bookings joined with property title, address, image_url
- * - Order by start_date DESC
- */
-export async function getTenantBookings(tenantId: string): Promise<BookingRecord[]> {
-  const result = await query<BookingRecord>(
-    `SELECT 
+const BOOKING_COLUMNS = `
       b.id,
       b.property_id,
       p.title AS property_title,
       p.city AS property_city,
       b.tenant_id,
-      b.start_date,
-      b.end_date,
+      b.start_date::text AS start_date,
+      b.end_date::text AS end_date,
       b.total_amount,
       b.status,
       b.special_requests,
-      b.created_at
+      b.created_at`;
+
+/**
+ * 2. Bookings of one tenant (tenants only ever see their own rows).
+ */
+export async function getTenantBookings(tenantId: string): Promise<BookingRecord[]> {
+  const result = await query<BookingRecord>(
+    `SELECT ${BOOKING_COLUMNS}
     FROM bookings b
     JOIN properties p ON b.property_id = p.id
     WHERE b.tenant_id = $1
     ORDER BY b.created_at DESC`,
     [tenantId]
   );
-
   return result.rows;
 }
 
 /**
- * ----------------------------------------------------------------------------
- * 3. Get Booking Requests for an Owner (Owner Dashboard)
- * ----------------------------------------------------------------------------
- * TODO for Member 2:
- * - Fetch all incoming requests for properties owned by this owner
- * - Join with tenant info (full_name, email, phone)
+ * 3. Booking requests for properties owned by one owner.
  */
 export async function getOwnerBookingRequests(ownerId: string): Promise<BookingRecord[]> {
   const result = await query<BookingRecord>(
-    `SELECT 
-      b.id,
-      b.property_id,
-      p.title AS property_title,
-      p.city AS property_city,
-      b.tenant_id,
+    `SELECT ${BOOKING_COLUMNS},
       u.full_name AS tenant_name,
-      u.email AS tenant_email,
-      b.start_date,
-      b.end_date,
-      b.total_amount,
-      b.status,
-      b.special_requests,
-      b.created_at
+      u.email AS tenant_email
     FROM bookings b
     JOIN properties p ON b.property_id = p.id
     JOIN users u ON b.tenant_id = u.id
@@ -176,18 +179,26 @@ export async function getOwnerBookingRequests(ownerId: string): Promise<BookingR
     ORDER BY b.created_at DESC`,
     [ownerId]
   );
-
   return result.rows;
 }
 
 /**
- * ----------------------------------------------------------------------------
- * 4. Update Booking Status (Owner Approval / Rejection Workflow)
- * ----------------------------------------------------------------------------
- * TODO for Member 2:
- * - Validate that the owner owns the property
- * - Update status to 'APPROVED' or 'REJECTED'
- * - Note: DB Trigger 'trg_validate_booking_overlap' will fire on APPROVED!
+ * Row of view_owner_analytics for one owner (KPI cards on the owner dashboard).
+ */
+export async function getOwnerAnalyticsFor(ownerId: string) {
+  const result = await query(
+    `SELECT * FROM view_owner_analytics WHERE owner_id = $1`,
+    [ownerId]
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * 4. Change a booking's status.
+ *    - OWNER  : PENDING -> APPROVED | REJECTED (own properties only)
+ *    - TENANT : PENDING | APPROVED -> CANCELLED (own bookings only)
+ *    The booking row is locked first. On APPROVED the DB trigger
+ *    trg_validate_booking_overlap fires; its exception message is returned as-is.
  */
 export async function updateBookingStatus(
   bookingId: string,
@@ -196,13 +207,13 @@ export async function updateBookingStatus(
   newStatus: 'APPROVED' | 'REJECTED' | 'CANCELLED'
 ): Promise<{ success: boolean; message: string }> {
   return await withTransaction(async (client) => {
-    // Verify the actor is allowed to touch this booking (owner of the property, or the tenant)
     const checkRes = await client.query(
       `SELECT b.id, b.status
        FROM bookings b
        JOIN properties p ON b.property_id = p.id
        WHERE b.id = $1
-         AND (($3 = 'OWNER' AND p.owner_id = $2) OR ($3 = 'TENANT' AND b.tenant_id = $2))`,
+         AND (($3 = 'OWNER' AND p.owner_id = $2) OR ($3 = 'TENANT' AND b.tenant_id = $2))
+       FOR UPDATE OF b`,
       [bookingId, actorId, actorRole]
     );
 
@@ -210,14 +221,27 @@ export async function updateBookingStatus(
       throw new Error('Booking not found or unauthorized');
     }
 
-    await client.query(
-      `UPDATE bookings SET status = $1 WHERE id = $2`,
-      [newStatus, bookingId]
-    );
+    const current: BookingStatus = checkRes.rows[0].status;
+    if (current === newStatus) {
+      throw new Error(`Booking is already ${current}`);
+    }
 
-    return {
-      success: true,
-      message: `Booking has been marked as ${newStatus}`,
+    // The same rules live in trg_validate_booking_transition; checking here gives a friendlier message
+    const allowedFrom: Record<string, BookingStatus[]> = {
+      APPROVED: ['PENDING'],
+      REJECTED: ['PENDING'],
+      CANCELLED: ['PENDING', 'APPROVED'],
     };
+    if (!allowedFrom[newStatus].includes(current)) {
+      throw new Error(`A ${current} booking cannot be changed to ${newStatus}`);
+    }
+
+    // May throw "Double booking conflict: ..." from trg_validate_booking_overlap
+    await client.query(`UPDATE bookings SET status = $1::booking_status WHERE id = $2`, [
+      newStatus,
+      bookingId,
+    ]);
+
+    return { success: true, message: `Booking has been marked as ${newStatus}` };
   });
 }

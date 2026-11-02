@@ -308,3 +308,28 @@ CREATE TRIGGER trg_validate_booking_overlap
 BEFORE INSERT OR UPDATE ON bookings
 FOR EACH ROW
 EXECUTE FUNCTION fn_trg_prevent_double_booking();
+
+
+-- Trigger 4: Enforce the booking state machine at the database level
+--   PENDING  -> APPROVED | REJECTED | CANCELLED
+--   APPROVED -> CANCELLED
+--   REJECTED / CANCELLED are terminal
+CREATE OR REPLACE FUNCTION fn_trg_validate_booking_transition()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.status = OLD.status THEN
+        RETURN NEW;
+    END IF;
+    IF (OLD.status = 'PENDING'  AND NEW.status IN ('APPROVED', 'REJECTED', 'CANCELLED'))
+    OR (OLD.status = 'APPROVED' AND NEW.status = 'CANCELLED') THEN
+        RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'Invalid booking status change: % -> %', OLD.status, NEW.status;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_validate_booking_transition ON bookings;
+CREATE TRIGGER trg_validate_booking_transition
+BEFORE UPDATE OF status ON bookings
+FOR EACH ROW
+EXECUTE FUNCTION fn_trg_validate_booking_transition();
