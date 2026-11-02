@@ -17,6 +17,19 @@ let transformersModule: any = null;
 let extractorPromise: Promise<any> | null = null;
 let useOfflineFallback = false;
 
+// How long to wait for the real model to load before giving up. Loading from the local cache takes
+// about a second; the very first run also downloads ~23 MB, so allow plenty of time by default.
+const MODEL_LOAD_TIMEOUT_MS = Number(process.env.EMBEDDING_LOAD_TIMEOUT_MS) || 60000;
+
+/**
+ * True once the app has fallen back to the hash vectorizer in this process. Those vectors are NOT
+ * comparable with real all-MiniLM-L6-v2 vectors, so anything that stores embeddings (the seed
+ * script) must check this and refuse to continue.
+ */
+export function isUsingFallbackEmbeddings(): boolean {
+  return useOfflineFallback;
+}
+
 function normalizeVector(vector: number[]): number[] {
   const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
   if (norm === 0) return vector;
@@ -119,10 +132,10 @@ async function getExtractor(): Promise<any> {
         const { pipeline, env } = transformersModule;
         env.allowLocalModels = false;
 
-        // 2-second timeout for remote HuggingFace CDN fetch
+        // timeout for the model load / remote HuggingFace CDN fetch (EMBEDDING_LOAD_TIMEOUT_MS)
         let timer: any;
         const timeoutPromise = new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error('Transformers model download timeout')), 2000);
+          timer = setTimeout(() => reject(new Error('Transformers model download timeout')), MODEL_LOAD_TIMEOUT_MS);
           if (typeof timer.unref === 'function') timer.unref();
         });
 
