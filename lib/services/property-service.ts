@@ -1,5 +1,6 @@
 import { query, withTransaction } from '@/lib/db';
 import { getEmbedding, buildPropertySearchText, toVectorLiteral } from '@/lib/embeddings';
+import { parseSearchQuery } from '@/lib/query-parser';
 
 export interface Property {
   id: string;
@@ -31,101 +32,107 @@ export interface SearchFilters {
   query?: string;
   city?: string;
   maxPrice?: number;
+  minPrice?: number;
   bedrooms?: number;
   limit?: number;
 }
 
+export interface SearchResult {
+  properties: Property[];
+  /** constraints understood from the sentence, e.g. ["under ₹20,000", "2 BHK"] */
+  applied: string[];
+  /** the text actually embedded for similarity (constraint phrases removed) */
+  semanticText: string;
+}
+
+const mapRow = (row: any): Property => ({
+  ...row,
+  price_per_month: Number(row.price_per_month),
+  avg_rating: Number(row.avg_rating),
+  ...(row.similarity_score !== undefined ? { similarity_score: Number(row.similarity_score) } : {}),
+});
+
 /**
- * Perform Semantic Vector Search with Hybrid SQL Filters
- * (Member 1 Implementation)
- * 
- * Uses PostgreSQL + pgvector cosine similarity (<=> operator)
- * via stored function fn_search_properties_semantic
+ * Hybrid search: natural-language sentence + explicit filters.
+ *
+ * 1. Hard constraints in the sentence ("under 20k", "2BHK", "in Pune") are parsed out and
+ *    applied as exact SQL filters. Explicit UI filters take precedence over parsed ones.
+ * 2. What is left of the sentence is embedded (all-MiniLM-L6-v2) and ranked by pgvector
+ *    cosine distance via fn_search_properties_semantic.
+ * 3. If nothing meaningful is left ("homes under 20k") the relational catalog is returned,
+ *    cheapest first.
  */
-export async function searchPropertiesSemantic(filters: SearchFilters): Promise<Property[]> {
-  const { query: searchQuery, city, maxPrice, bedrooms, limit = 12 } = filters;
+export async function searchProperties(filters: SearchFilters): Promise<SearchResult> {
+  const { query: searchQuery, limit } = filters;
 
-  // If no semantic query provided, fallback to standard relational catalog filter
-  if (!searchQuery || searchQuery.trim().length === 0) {
-    let sql = `
-      SELECT * FROM view_property_catalog
-      WHERE status = 'AVAILABLE'
-    `;
+  const cityRows = await query<{ city: string }>(`SELECT DISTINCT city FROM properties`);
+  const parsed = parseSearchQuery(searchQuery ?? '', cityRows.rows.map((r) => r.city));
+
+  const city = filters.city && filters.city !== 'All' ? filters.city : parsed.city;
+  const maxPrice = filters.maxPrice ?? parsed.maxPrice;
+  const minPrice = filters.minPrice ?? parsed.minPrice;
+  const bedrooms = filters.bedrooms ?? parsed.bedrooms;
+
+  const applied = [...parsed.applied];
+  // Mention UI filters that are not already visible as chips from the sentence
+  if (filters.maxPrice !== undefined && parsed.maxPrice === undefined) applied.push(`under ₹${filters.maxPrice.toLocaleString('en-IN')}`);
+  if (filters.bedrooms !== undefined && parsed.bedrooms === undefined) applied.push(`${filters.bedrooms} BHK`);
+  if (filters.city && filters.city !== 'All' && parsed.city === undefined) applied.push(filters.city);
+
+  // No semantic content left: plain relational listing
+  if (parsed.isGeneric || parsed.text.trim().length === 0) {
+    let sql = `SELECT * FROM view_property_catalog WHERE status = 'AVAILABLE'`;
     const params: any[] = [];
-    let paramIndex = 1;
-
-    if (city && city !== 'All') {
-      sql += ` AND LOWER(city) = LOWER($${paramIndex++})`;
+    if (city) {
       params.push(city);
+      sql += ` AND LOWER(city) = LOWER($${params.length})`;
     }
-    if (maxPrice) {
-      sql += ` AND price_per_month <= $${paramIndex++}`;
+    if (maxPrice !== undefined) {
       params.push(maxPrice);
+      sql += ` AND price_per_month <= $${params.length}`;
     }
-    if (bedrooms) {
-      sql += ` AND bedrooms = $${paramIndex++}`;
+    if (minPrice !== undefined) {
+      params.push(minPrice);
+      sql += ` AND price_per_month >= $${params.length}`;
+    }
+    if (bedrooms !== undefined) {
       params.push(bedrooms);
+      sql += ` AND bedrooms = $${params.length}`;
     }
-
-    sql += ` ORDER BY created_at DESC LIMIT $${paramIndex}`;
-    params.push(limit);
+    const order = minPrice !== undefined && maxPrice === undefined ? 'price_per_month DESC' : 'price_per_month ASC';
+    params.push(limit ?? 60);
+    sql += ` ORDER BY ${order}, created_at DESC LIMIT $${params.length}`;
 
     const result = await query<Property>(sql, params);
-    return result.rows.map((row) => ({
-      ...row,
-      price_per_month: Number(row.price_per_month),
-      avg_rating: Number(row.avg_rating),
-    }));
+    return { properties: result.rows.map(mapRow), applied, semanticText: '' };
   }
 
-  // 1. Generate 384-dimensional dense vector for the natural language query
-  const queryEmbedding = await getEmbedding(searchQuery);
+  // Semantic path: embed only the descriptive part of the sentence
+  const queryEmbedding = await getEmbedding(parsed.text);
   const vectorStr = toVectorLiteral(queryEmbedding);
 
-  // 2. Query PostgreSQL pgvector cosine distance function
   const sql = `
-    SELECT 
-      id,
-      title,
-      description,
-      property_type,
-      price_per_month,
-      bedrooms,
-      bathrooms,
-      area_sqft,
-      address,
-      city,
-      status,
-      amenities,
-      image_url,
-      owner_name,
-      avg_rating,
+    SELECT
+      id, title, description, property_type, price_per_month, bedrooms, bathrooms,
+      area_sqft, address, city, status, amenities, image_url, owner_name, avg_rating,
       ROUND((similarity_score * 100)::numeric, 1)::float AS similarity_score
-    FROM fn_search_properties_semantic(
-      $1::text::vector,
-      0.15,
-      $2,
-      $3,
-      $4,
-      $5
-    )
+    FROM fn_search_properties_semantic($1::text::vector, 0.10, $2, $3, $4, $5)
+    WHERE ($6::numeric IS NULL OR price_per_month >= $6)
   `;
-
-  const params = [
+  const result = await query<Property>(sql, [
     vectorStr,
-    limit,
-    city && city !== 'All' ? city : null,
-    maxPrice || null,
-    bedrooms || null,
-  ];
+    limit ?? 30,
+    city ?? null,
+    maxPrice ?? null,
+    bedrooms ?? null,
+    minPrice ?? null,
+  ]);
+  return { properties: result.rows.map(mapRow), applied, semanticText: parsed.text };
+}
 
-  const result = await query<Property>(sql, params);
-  return result.rows.map((row) => ({
-    ...row,
-    price_per_month: Number(row.price_per_month),
-    avg_rating: Number(row.avg_rating),
-    similarity_score: Number(row.similarity_score),
-  }));
+/** Backwards-compatible wrapper that returns only the listings. */
+export async function searchPropertiesSemantic(filters: SearchFilters): Promise<Property[]> {
+  return (await searchProperties(filters)).properties;
 }
 
 /**
