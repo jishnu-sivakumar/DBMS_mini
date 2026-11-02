@@ -66,6 +66,8 @@ export async function createBookingRequest(
   if (start < today) throw new Error('Start date cannot be in the past');
 
   return await withTransaction(async (client) => {
+    await client.query(`SELECT set_config('app.user_id', $1, true)`, [data.tenant_id]);
+
     // Step 1: lock the property row so concurrent requests are serialised
     const propCheck = await client.query(
       `SELECT id, price_per_month, status, owner_id
@@ -221,6 +223,9 @@ export async function updateBookingStatus(
       throw new Error('Booking not found or unauthorized');
     }
 
+    // Let trg_audit_booking_status record who made the change (transaction-local setting)
+    await client.query(`SELECT set_config('app.user_id', $1, true)`, [actorId]);
+
     const current: BookingStatus = checkRes.rows[0].status;
     if (current === newStatus) {
       throw new Error(`Booking is already ${current}`);
@@ -244,4 +249,86 @@ export async function updateBookingStatus(
 
     return { success: true, message: `Booking has been marked as ${newStatus}` };
   });
+}
+
+export type PaymentMethod = 'UPI' | 'CARD' | 'NET_BANKING';
+const METHODS: PaymentMethod[] = ['UPI', 'CARD', 'NET_BANKING'];
+
+/**
+ * 5. Pay for an APPROVED booking (tenant only), inside one transaction.
+ *    The booking row is locked so two clicks cannot create two payments; the
+ *    unique partial index and trg_payment_stamp_and_validate back this up in the DB.
+ */
+export async function payBooking(
+  bookingId: string,
+  tenantId: string,
+  method: string
+): Promise<{ success: boolean; message: string; transactionRef: string }> {
+  if (!METHODS.includes(method as PaymentMethod)) {
+    throw new Error(`Payment method must be one of: ${METHODS.join(', ')}`);
+  }
+
+  return await withTransaction(async (client) => {
+    const res = await client.query(
+      `SELECT id, status, total_amount
+       FROM bookings
+       WHERE id = $1 AND tenant_id = $2
+       FOR UPDATE`,
+      [bookingId, tenantId]
+    );
+    if (res.rows.length === 0) throw new Error('Booking not found or unauthorized');
+
+    const booking = res.rows[0];
+    if (booking.status !== 'APPROVED') {
+      throw new Error(`Only APPROVED bookings can be paid (this one is ${booking.status})`);
+    }
+
+    const already = await client.query(
+      `SELECT 1 FROM payments WHERE booking_id = $1 AND status = 'PAID'`,
+      [bookingId]
+    );
+    if (already.rows.length > 0) throw new Error('This booking has already been paid');
+
+    // paid_at is stamped by trg_payment_stamp_and_validate
+    const pay = await client.query(
+      `INSERT INTO payments (booking_id, amount, method, status)
+       VALUES ($1, $2, $3::payment_method, 'PAID')
+       RETURNING transaction_ref`,
+      [bookingId, booking.total_amount, method]
+    );
+
+    return {
+      success: true,
+      message: 'Payment successful',
+      transactionRef: pay.rows[0].transaction_ref,
+    };
+  });
+}
+
+/**
+ * 6. Status history for one booking (visible to its tenant or the property owner).
+ */
+export async function getBookingHistory(bookingId: string, userId: string, role: 'OWNER' | 'TENANT') {
+  const access = await query(
+    `SELECT 1
+     FROM bookings b JOIN properties p ON p.id = b.property_id
+     WHERE b.id = $1 AND (($3 = 'OWNER' AND p.owner_id = $2) OR ($3 = 'TENANT' AND b.tenant_id = $2))`,
+    [bookingId, userId, role]
+  );
+  if (access.rows.length === 0) throw new Error('Booking not found or unauthorized');
+
+  const [audit, payments] = await Promise.all([
+    query(
+      `SELECT a.old_status, a.new_status, a.changed_at, u.full_name AS changed_by_name
+       FROM booking_audit a LEFT JOIN users u ON u.id = a.changed_by
+       WHERE a.booking_id = $1 ORDER BY a.id`,
+      [bookingId]
+    ),
+    query(
+      `SELECT amount, method, status, transaction_ref, paid_at
+       FROM payments WHERE booking_id = $1 ORDER BY created_at`,
+      [bookingId]
+    ),
+  ]);
+  return { audit: audit.rows, payments: payments.rows };
 }
