@@ -116,7 +116,7 @@ docker exec -i propfind-db psql -U postgres -d propfind_db < db/transactions_tes
 
 ## 📄 Project report
 
-The full project report (title, students, abstract, tech stack, SQL commands, vector commands, project tree, screenshots, rubric status, data dictionary) is in [`docs/report/`](docs/report/): `PropFind_Project_Report.pdf` (52 pages) and an editable `PropFind_Project_Report.docx`. All screenshots are in `docs/report/images/`.
+The full project report is in [`docs/report/`](docs/report/): `PropFind_Project_Report.pdf` (75 pages) and an editable `PropFind_Project_Report.docx`. It follows the PES University mini-project report format: cover page, certificate, declaration, acknowledgement, abstract, contents, lists of tables and figures, then chapters 1 to 9 (introduction, problem definition, ER model, ER to relational mapping, DDL, DML, queries, stored procedures / functions / triggers, front end), references and appendices (definitions, data dictionary, rubric completion status). All screenshots are in `docs/report/images/`.
 
 ## 📖 Project Documentation Directory (`docs/`)
 
