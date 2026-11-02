@@ -35,7 +35,9 @@ CREATE TABLE users (
     phone VARCHAR(20),
     avatar_url TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT users_email_format CHECK (email ~* '^[^@\s]+@[^@\s]+\.[^@\s]+$'),
+    CONSTRAINT users_phone_format CHECK (phone IS NULL OR phone ~ '^\+?[0-9 ]{10,20}$')
 );
 
 -- 5. Properties Table (Relational Catalog)
